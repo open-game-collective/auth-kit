@@ -230,12 +230,19 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
 export function withAuth<TEnv extends { AUTH_SECRET: string }>(
   handler: (request: Request, env: TEnv & { userId: string; sessionId: string }) => Promise<Response>,
   config: {
-    hooks?: AuthHooks<TEnv>;
+    hooks: AuthHooks<TEnv>;
   }
 ) {
   const { hooks } = config;
+  const router = createAuthRouter({ hooks });
 
   return async (request: Request, env: TEnv): Promise<Response> => {
+    const url = new URL(request.url);
+    // Handle auth routes first
+    if (url.pathname.startsWith("/auth/")) {
+      return router(request, env);
+    }
+
     const sessionToken = getCookie(request, SESSION_TOKEN_COOKIE);
     const refreshToken = getCookie(request, REFRESH_TOKEN_COOKIE);
 
@@ -263,7 +270,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
           newSessionToken = await createSessionToken(userId, env.AUTH_SECRET);
           newRefreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
           
-          if (hooks?.onNewUser) {
+          if (hooks.onNewUser) {
             await hooks.onNewUser({ userId, env, request });
           }
         }
@@ -274,7 +281,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
         newSessionToken = await createSessionToken(userId, env.AUTH_SECRET);
         newRefreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
         
-        if (hooks?.onNewUser) {
+        if (hooks.onNewUser) {
           await hooks.onNewUser({ userId, env, request });
         }
       }
@@ -285,7 +292,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
       newSessionToken = await createSessionToken(userId, env.AUTH_SECRET);
       newRefreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
       
-      if (hooks?.onNewUser) {
+      if (hooks.onNewUser) {
         await hooks.onNewUser({ userId, env, request });
       }
     }

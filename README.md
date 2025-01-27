@@ -7,7 +7,7 @@ A full-stack authentication toolkit for React applications. Built on Cloudflare 
 - [💾 Installation](#-installation)
 - [🌟 Key Features](#-key-features)
 - [🛠️ Usage Guide](#️-usage-guide)
-  - [1️⃣ Set up Shared Auth Hooks](#1️⃣-set-up-shared-auth-hooks)
+  - [1️⃣ Set up Cloudflare Worker](#1️⃣-set-up-cloudflare-worker)
   - [2️⃣ Configure Auth Router](#2️⃣-configure-auth-router)
   - [3️⃣ Set up Auth Client](#3️⃣-set-up-auth-client)
   - [4️⃣ Use React Hooks](#4️⃣-use-react-hooks)
@@ -40,28 +40,122 @@ pnpm add auth-kit jose
 
 ## 🛠️ Usage Guide
 
-### 1️⃣ Set up Shared Auth Hooks
+### 1️⃣ Set up Cloudflare Worker
+
+First, create a new Cloudflare Worker project or add to an existing one:
+
+```bash
+# Create new worker project
+npx wrangler init my-auth-worker
+cd my-auth-worker
+
+# Install dependencies
+npm install auth-kit jose
+```
+
+Configure your worker's environment variables in `wrangler.toml`:
+
+```toml
+name = "my-auth-worker"
+main = "src/worker.ts"
+
+[vars]
+# Required: Secret key for JWT signing
+AUTH_SECRET = "your-secret-key-here" # Use `wrangler secret put AUTH_SECRET` in production
+```
+
+Create your worker entry point:
 
 ```typescript
-// app/auth.server.ts
-import type { AuthHooks } from "auth-kit/worker";
-import type { Env } from "./env";
+// src/worker.ts
+import { createAuthRouter, withAuth } from "auth-kit/worker";
 
-export const authHooks: AuthHooks<Env> = {
-  onNewUser: async ({ userId, env, request }) => {
-    // Initialize user in Durable Object when created
-    const id = env.USER.idFromName(userId);
-    await env.USER.get(id).spawn();
+// Configure your auth hooks
+const authHooks = {
+  // Required: Look up a user ID by email address
+  getUserIdByEmail: async ({ email, env }) => {
+    // Example using KV:
+    return await env.USERS_KV.get(`email:${email}`);
   },
-  onEmailVerified: async ({ userId, email, env, request }) => {
-    // Update user's verified status
-    const id = env.USER.idFromName(userId);
-    await env.USER.get(id).send({
-      type: "CLAIM",
-      email
-    });
+
+  // Required: Store a verification code
+  storeVerificationCode: async ({ email, code, env }) => {
+    // Example using KV with 10-minute expiration:
+    await env.CODES_KV.put(`code:${email}`, code, { expirationTtl: 600 });
+  },
+
+  // Required: Verify a code
+  verifyVerificationCode: async ({ email, code, env }) => {
+    const storedCode = await env.CODES_KV.get(`code:${email}`);
+    return storedCode === code;
+  },
+
+  // Required: Send verification code via email
+  sendVerificationCode: async ({ email, code, env }) => {
+    try {
+      // Example using Resend:
+      await env.RESEND.emails.send({
+        from: "auth@yourdomain.com",
+        to: email,
+        subject: "Your verification code",
+        text: `Your code is: ${code}`
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to send email:', error);
+      return false;
+    }
+  },
+
+  // Optional: Called when new users are created
+  onNewUser: async ({ userId, env }) => {
+    await env.USERS_KV.put(`user:${userId}`, JSON.stringify({
+      created: new Date().toISOString()
+    }));
+  },
+
+  // Optional: Called on successful authentication
+  onAuthenticate: async ({ userId, email, env }) => {
+    await env.USERS_KV.put(`user:${userId}:lastLogin`, new Date().toISOString());
+  },
+
+  // Optional: Called when email is verified
+  onEmailVerified: async ({ userId, email, env }) => {
+    await env.USERS_KV.put(`user:${userId}:verified`, 'true');
+    await env.USERS_KV.put(`email:${email}`, userId);
   }
 };
+
+// Create the auth router
+const router = createAuthRouter({ hooks: authHooks });
+
+// Export the worker
+export default {
+  fetch: withAuth(async (request, env) => {
+    // The env object includes userId and sessionId
+    return new Response("Hello authenticated user: " + env.userId);
+  }, { hooks: authHooks })
+};
+```
+
+Configure your bindings in `wrangler.toml`:
+
+```toml
+# KV Namespaces
+kv_namespaces = [
+  { binding = "USERS_KV", id = "..." },
+  { binding = "CODES_KV", id = "..." }
+]
+
+# Example: Resend for email
+[vars]
+RESEND_API_KEY = "..." # Use `wrangler secret put RESEND_API_KEY` in production
+```
+
+Deploy your worker:
+
+```bash
+wrangler deploy
 ```
 
 ### 2️⃣ Configure Auth Router
