@@ -7,10 +7,11 @@ A full-stack authentication toolkit for React applications. Built on Cloudflare 
 - [💾 Installation](#-installation)
 - [🌟 Key Features](#-key-features)
 - [🛠️ Usage Guide](#️-usage-guide)
-  - [1️⃣ Set up Cloudflare Worker](#1️⃣-set-up-cloudflare-worker)
-  - [2️⃣ Configure Auth Router](#2️⃣-configure-auth-router)
-  - [3️⃣ Set up Auth Client](#3️⃣-set-up-auth-client)
-  - [4️⃣ Use React Hooks](#4️⃣-use-react-hooks)
+  - [1️⃣ Set up Environment Types](#1️⃣-set-up-environment-types)
+  - [2️⃣ Set up Worker Entry Point](#2️⃣-set-up-worker-entry-point)
+  - [3️⃣ Access Auth in Remix Routes](#3️⃣-access-auth-in-remix-routes)
+  - [4️⃣ Configure Worker](#4️⃣-configure-worker)
+  - [5️⃣ Set up Auth Client](#5️⃣-set-up-auth-client)
 - [🏗️ Architecture](#️-architecture)
 - [📖 API Reference](#-api-reference)
   - [🔐 auth-kit/client](#-auth-kitclient)
@@ -40,47 +41,57 @@ pnpm add auth-kit jose
 
 ## 🛠️ Usage Guide
 
-### 1️⃣ Set up Cloudflare Worker
+### 1️⃣ Set up Environment Types
 
-First, create a new Cloudflare Worker project or add to an existing one:
+First, set up your environment types to include auth-kit's additions to the Remix context:
 
-```bash
-# Create new worker project
-npx wrangler init my-auth-worker
-cd my-auth-worker
+```typescript
+// app/types/env.ts
+declare module "@remix-run/cloudflare" {
+  interface AppLoadContext {
+    env: Env;
+    // Added by auth-kit middleware
+    userId: string;
+    sessionId: string;
+  }
+}
 
-# Install dependencies
-npm install auth-kit jose
+export interface Env {
+  // Required for auth-kit
+  AUTH_SECRET: string;
+  
+  // Storage for users and verification codes
+  USERS_KV: KVNamespace;
+  CODES_KV: KVNamespace;
+  
+  // Email service (optional)
+  SENDGRID_API_KEY?: string;
+  RESEND_API_KEY?: string;
+  
+  // Your other environment variables
+  [key: string]: unknown;
+}
 ```
 
-Configure your worker's environment variables in `wrangler.toml`:
+### 2️⃣ Set up Worker Entry Point
 
-```toml
-name = "my-auth-worker"
-main = "src/worker.ts"
-
-[vars]
-# Required: Secret key for JWT signing
-AUTH_SECRET = "your-secret-key-here" # Use `wrangler secret put AUTH_SECRET` in production
-```
-
-Create your worker entry point:
+Create your worker entry point that wraps the Remix handler:
 
 ```typescript
 // src/worker.ts
 import { createAuthRouter, withAuth } from "auth-kit/worker";
+import { createRequestHandler } from "@remix-run/cloudflare";
+import * as build from "@remix-run/dev/server-build";
 
 // Configure your auth hooks
 const authHooks = {
   // Required: Look up a user ID by email address
   getUserIdByEmail: async ({ email, env }) => {
-    // Example using KV:
     return await env.USERS_KV.get(`email:${email}`);
   },
 
   // Required: Store a verification code
   storeVerificationCode: async ({ email, code, env }) => {
-    // Example using KV with 10-minute expiration:
     await env.CODES_KV.put(`code:${email}`, code, { expirationTtl: 600 });
   },
 
@@ -93,14 +104,21 @@ const authHooks = {
   // Required: Send verification code via email
   sendVerificationCode: async ({ email, code, env }) => {
     try {
-      // Example using Resend:
-      await env.RESEND.emails.send({
-        from: "auth@yourdomain.com",
-        to: email,
-        subject: "Your verification code",
-        text: `Your code is: ${code}`
+      // Example using SendGrid:
+      const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.SENDGRID_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email }] }],
+          from: { email: "auth@yourdomain.com" },
+          subject: "Your verification code",
+          content: [{ type: "text/plain", value: `Your code is: ${code}` }],
+        }),
       });
-      return true;
+      return response.ok;
     } catch (error) {
       console.error('Failed to send email:', error);
       return false;
@@ -126,30 +144,81 @@ const authHooks = {
   }
 };
 
-// Create the auth router
-const router = createAuthRouter({ hooks: authHooks });
+// Create request handler with auth middleware
+const handleRequest = createRequestHandler(build, process.env.NODE_ENV);
 
-// Export the worker
+// Export the worker with auth middleware
 export default {
   fetch: withAuth(async (request, env) => {
-    // The env object includes userId and sessionId
-    return new Response("Hello authenticated user: " + env.userId);
+    try {
+      // Pass userId and sessionId to Remix loader context
+      const loadContext = { env, userId: env.userId, sessionId: env.sessionId };
+      return await handleRequest(request, loadContext);
+    } catch (error) {
+      console.error("Error processing request:", error);
+      return new Response("Internal Error", { status: 500 });
+    }
   }, { hooks: authHooks })
 };
 ```
 
-Configure your bindings in `wrangler.toml`:
+### 3️⃣ Access Auth in Remix Routes
+
+Now you can access the authenticated user in your Remix routes:
+
+```typescript
+// app/routes/_index.tsx
+import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { json } from "@remix-run/cloudflare";
+import { useLoaderData } from "@remix-run/react";
+
+export async function loader({ context }: LoaderFunctionArgs) {
+  // Access userId and sessionId from context
+  const { userId, sessionId } = context;
+  
+  // Example: Fetch user data from KV
+  const userData = await context.env.USERS_KV.get(`user:${userId}`);
+  
+  return json({ 
+    userId,
+    sessionId,
+    userData: userData ? JSON.parse(userData) : null 
+  });
+}
+
+export default function Index() {
+  const { userId, userData } = useLoaderData<typeof loader>();
+  
+  return (
+    <div>
+      <h1>Welcome, {userId}!</h1>
+      {userData?.verified && <p>✅ Email verified</p>}
+    </div>
+  );
+}
+```
+
+### 4️⃣ Configure Worker
+
+Configure your worker in `wrangler.toml`:
 
 ```toml
-# KV Namespaces
+name = "my-remix-app"
+main = "src/worker.ts"
+compatibility_date = "2024-01-01"
+
+[vars]
+NODE_ENV = "development"
+
+# KV Namespaces for auth storage
 kv_namespaces = [
   { binding = "USERS_KV", id = "..." },
   { binding = "CODES_KV", id = "..." }
 ]
 
-# Example: Resend for email
-[vars]
-RESEND_API_KEY = "..." # Use `wrangler secret put RESEND_API_KEY` in production
+# Secrets (use wrangler secret put for production)
+# - AUTH_SECRET
+# - SENDGRID_API_KEY
 ```
 
 Deploy your worker:
@@ -158,78 +227,7 @@ Deploy your worker:
 wrangler deploy
 ```
 
-### 2️⃣ Configure Auth Router
-
-```typescript
-// app/worker.ts
-import { createAuthRouter, withAuth } from "auth-kit/worker";
-import { authHooks } from "./auth.server";
-
-// Create the auth router
-const router = createAuthRouter<Env>({
-  hooks: {
-    // Look up a user ID by email address
-    getUserIdByEmail: async ({ email, env, request }) => {
-      // Return the user ID if found, null if no user exists with this email
-      return await env.DB.get(`user:${email}`);
-    },
-
-    // Store a verification code for an email address
-    storeVerificationCode: async ({ email, code, env, request }) => {
-      // Store the code with expiration (e.g. 10 minutes)
-      await env.DB.put(`verification:${email}`, code, { expirationTtl: 600 });
-    },
-
-    // Verify if a code matches what was stored for an email
-    verifyVerificationCode: async ({ email, code, env, request }) => {
-      const storedCode = await env.DB.get(`verification:${email}`);
-      return storedCode === code;
-    },
-
-    // Send a verification code via email
-    sendVerificationCode: async ({ email, code, env, request }) => {
-      try {
-        await sendEmail({
-          to: email,
-          subject: "Your verification code",
-          text: `Your code is: ${code}`
-        });
-        return true;
-      } catch (error) {
-        console.error('Failed to send email:', error);
-        return false;
-      }
-    },
-
-    // Optional: Called when a new anonymous user is created
-    onNewUser: async ({ userId, env, request }) => {
-      await env.DB.put(`user:${userId}`, { created: new Date() });
-    },
-
-    // Optional: Called when a user successfully authenticates with their email code
-    onAuthenticate: async ({ userId, email, env, request }) => {
-      await env.DB.put(`user:${userId}:lastLogin`, new Date());
-    },
-
-    // Optional: Called when a user verifies their email address for the first time
-    onEmailVerified: async ({ userId, email, env, request }) => {
-      await env.DB.put(`user:${userId}:verified`, true);
-    }
-  }
-});
-
-// Wrap your request handler with auth middleware
-export default {
-  fetch: withAuth(async (request, env) => {
-    if (request.url.includes("/auth/")) {
-      return router(request, env);
-    }
-    return new Response("Not Found", { status: 404 });
-  }, { hooks: authHooks })
-};
-```
-
-### 3️⃣ Set up Auth Client
+### 5️⃣ Set up Auth Client
 
 ```typescript
 // app/auth.client.ts
@@ -238,53 +236,6 @@ import { createAuthClient } from "auth-kit/client";
 export const authClient = createAuthClient({
   baseUrl: "https://your-worker.workers.dev"
 });
-```
-
-### 4️⃣ Use React Hooks and Components
-
-```typescript
-// app/auth.context.ts
-import { createAuthContext } from "auth-kit/react";
-
-export const AuthContext = createAuthContext();
-
-// app/routes/profile.tsx
-import { AuthContext } from "../auth.context";
-
-export default function Profile() {
-  // Use the useSelector hook for fine-grained state updates
-  const userId = AuthContext.useSelector(state => state.userId);
-  const isVerified = AuthContext.useSelector(state => state.isVerified);
-  
-  // Or use the useAuth hook for all auth state and methods
-  const { requestCode, verifyEmail } = AuthContext.useAuth();
-
-  const handleVerify = async (email: string, code: string) => {
-    await verifyEmail(email, code);
-  };
-
-  return (
-    <div>
-      <h1>Profile</h1>
-      
-      <AuthContext.Loading>
-        <div>Loading...</div>
-      </AuthContext.Loading>
-
-      <AuthContext.Authenticated>
-        <p>User ID: {userId}</p>
-        
-        <AuthContext.Verified>
-          <p>✅ Email verified</p>
-        </AuthContext.Verified>
-        
-        <AuthContext.Unverified>
-          <EmailVerificationForm onVerify={handleVerify} />
-        </AuthContext.Unverified>
-      </AuthContext.Authenticated>
-    </div>
-  );
-}
 ```
 
 ## 🏗️ Architecture
