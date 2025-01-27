@@ -423,24 +423,84 @@ The React integration provides:
 
 ## 🏗️ Architecture
 
-Auth Kit uses a combination of session tokens (15-minute expiry) and refresh tokens (7-day expiry) to manage authentication state. The system follows an anonymous-first approach where new users are automatically created with a session, which can later be associated with an email through verification.
+Auth Kit is built on three main components that work together to provide a complete authentication solution:
 
-### Token Flow
+### 1. Worker Middleware (`auth-kit/worker`)
+- Handles all `/auth/*` routes automatically
+- Manages JWT session (15m) and refresh (7d) tokens
+- Creates anonymous users for new visitors
+- Provides hooks for email verification and user management
+- Integrates with Remix's loader context to provide `userId` and `sessionId`
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant Worker
+### 2. Auth Client (`auth-kit/client`)
+- Manages auth state on the client
+- Handles token refresh automatically
+- Provides methods for email verification flow
+- Implements pub/sub for state updates
+- Works with or without React
 
-    Client->>Worker: Initial Request
-    Worker->>Worker: Create Anonymous User
-    Worker->>Client: Set Session & Refresh Tokens
+### 3. React Integration (`auth-kit/react`)
+- Provides hooks for accessing auth state
+- Offers conditional rendering components
+- Handles state subscriptions efficiently
+- Integrates with Suspense for loading states
 
-    Note over Client,Worker: After 15 minutes...
-    Client->>Worker: Request with Expired Session
-    Worker->>Worker: Verify Refresh Token
-    Worker->>Client: New Session & Refresh Tokens
-```
+### Authentication Flow
+
+1. **Initial Visit**
+   ```typescript
+   // 1. Middleware creates anonymous user
+   const userId = crypto.randomUUID();
+   const sessionToken = await createSessionToken(userId);
+   const refreshToken = await createRefreshToken(userId);
+   
+   // 2. Tokens available in Remix loader context
+   export async function loader({ context }: LoaderFunctionArgs) {
+     const { userId, sessionId } = context;
+     // ...
+   }
+   
+   // 3. React components can access auth state
+   function Profile() {
+     const { userId, isVerified } = AuthContext.useAuth();
+     // ...
+   }
+   ```
+
+2. **Email Verification**
+   ```typescript
+   // 1. User requests verification code
+   const { requestCode } = AuthContext.useAuth();
+   await requestCode("user@example.com");
+   
+   // 2. Worker calls hooks
+   await hooks.storeVerificationCode({ email, code, env });
+   await hooks.sendVerificationCode({ email, code, env });
+   
+   // 3. User verifies code
+   const { verifyEmail } = AuthContext.useAuth();
+   await verifyEmail("user@example.com", "123456");
+   
+   // 4. Worker updates user
+   await hooks.onEmailVerified({ userId, email, env });
+   ```
+
+3. **Token Refresh**
+   ```typescript
+   // 1. Session token expires (15m)
+   // 2. Client uses refresh token to get new session
+   // 3. Worker validates refresh token (7d)
+   // 4. New tokens are issued
+   // 5. Auth state is updated automatically
+   ```
+
+This architecture provides:
+- 🔒 Secure, JWT-based sessions
+- 🎭 Anonymous-first authentication
+- 📨 Customizable email verification
+- ⚡️ Automatic token refresh
+- 🎯 Type-safe integration with Remix
+- 🎨 Efficient React state management
 
 ## 📖 API Reference
 
