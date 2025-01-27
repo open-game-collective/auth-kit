@@ -64,10 +64,18 @@ function getCookie(request: Request, name: string): string | undefined {
   return cookie ? cookie.split('=')[1] : undefined;
 }
 
+function generateVerificationCode(): string {
+  // Generate a secure 6-digit code
+  const min = 100000; // 6 digits, starting with 1
+  const max = 999999;
+  const code = Math.floor(Math.random() * (max - min + 1) + min);
+  return code.toString();
+}
+
 export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
-  hooks?: AuthHooks<TEnv>;
+  hooks: AuthHooks<TEnv>;
 }) {
-  const _hooks = config.hooks; // Prefix with _ since it's not used yet
+  const { hooks } = config;
 
   return async (request: Request, env: TEnv): Promise<Response> => {
     const url = new URL(request.url);
@@ -88,15 +96,79 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
     try {
       switch (route) {
         case "verify": {
-          const { email: _email, code: _code } = await request.json() as { email: string; code: string };
-          // TODO: Implement email verification logic
-          return new Response(JSON.stringify({ success: true }));
+          const { email, code } = await request.json() as { email: string; code: string };
+          
+          // Look up the user ID for this email
+          let userId = await hooks.getUserIdByEmail({ email, env, request });
+          const isNewUser = !userId;
+          
+          // Verify the code
+          const isValid = await hooks.verifyVerificationCode({ email, code, env, request });
+          if (!isValid) {
+            return new Response("Invalid or expired code", { status: 400 });
+          }
+          
+          if (isNewUser) {
+            // Generate a new user ID for new users
+            userId = crypto.randomUUID();
+            
+            // Call onNewUser hook if provided
+            if (hooks.onNewUser) {
+              await hooks.onNewUser({ userId, env, request });
+            }
+          }
+
+          // At this point userId is definitely defined
+          if (!userId) {
+            return new Response("Failed to create user", { status: 500 });
+          }
+
+          // Call authentication hooks
+          if (hooks.onAuthenticate) {
+            await hooks.onAuthenticate({ userId, email, env, request });
+          }
+
+          // Call onEmailVerified for all successful verifications
+          if (hooks.onEmailVerified) {
+            await hooks.onEmailVerified({ userId, email, env, request });
+          }
+
+          // Generate new session and refresh tokens for the authenticated user
+          const sessionToken = await createSessionToken(userId, env.AUTH_SECRET);
+          const refreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
+
+          return new Response(JSON.stringify({ 
+            success: true,
+            userId,
+            sessionToken,
+            refreshToken
+          }), {
+            headers: { 'Content-Type': 'application/json' }
+          });
         }
 
         case "request-code": {
-          const { email: _email } = await request.json() as { email: string };
-          // TODO: Implement send verification code logic
-          return new Response(JSON.stringify({ success: true }));
+          const { email } = await request.json() as { email: string };
+          
+          // Generate a new verification code
+          const code = generateVerificationCode();
+          
+          // Store the code
+          await hooks.storeVerificationCode({ email, code, env, request });
+          
+          // Send the code via email
+          const sent = await hooks.sendVerificationCode({ email, code, env, request });
+          if (!sent) {
+            return new Response("Failed to send verification code", { status: 500 });
+          }
+          
+          return new Response(JSON.stringify({ 
+            success: true,
+            message: "Code sent to email",
+            expiresIn: 600 // 10 minutes
+          }), {
+            headers: { 'Content-Type': 'application/json' }
+          });
         }
 
         case "refresh": {
@@ -105,7 +177,7 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           
           if (!authHeader?.startsWith('Bearer ')) {
             console.log('No Bearer token found');
-            return new Response("No refresh token", { status: 401 });
+            return new Response("No refresh token provided", { status: 401 });
           }
 
           const refreshToken = authHeader.slice(7); // Remove 'Bearer ' prefix
@@ -124,10 +196,12 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           console.log('New tokens generated:', { newSessionToken, newRefreshToken });
 
           return new Response(JSON.stringify({
-            userId: payload.userId,
+            success: true,
             sessionToken: newSessionToken,
             refreshToken: newRefreshToken
-          }));
+          }), {
+            headers: { 'Content-Type': 'application/json' }
+          });
         }
 
         case "logout": {

@@ -1,6 +1,6 @@
 # 🔐 Auth Kit
 
-A full-stack toolkit for implementing secure, scalable authentication in React applications. Leveraging Cloudflare Workers and Durable Objects, Auth Kit offers a low-latency authentication solution with support for anonymous-first auth, email verification, and secure token management.
+A full-stack authentication toolkit for React applications. Built on Cloudflare Workers, Auth Kit provides a secure, low-latency authentication system with email verification and token management. Perfect for applications that need a robust auth system with a great developer experience.
 
 ## 📚 Table of Contents
 
@@ -30,15 +30,13 @@ pnpm add auth-kit jose
 
 ## 🌟 Key Features
 
-- 🎭 **Anonymous-First Auth**: Start with anonymous users and progressively enhance their identity
-- 📧 **Email Verification**: Built-in email verification flow
-- 🔐 **Secure Token Management**: JWT-based session and refresh tokens
-- 🔄 **Auto Token Refresh**: Automatic refresh of session tokens before expiry
-- 📱 **Cross-Platform**: Works with both web and React Native applications
-- 🎯 **Type Safety**: Full TypeScript support
-- 🔌 **Framework Agnostic**: Core functionality works with any framework
-- 🎨 **Flexible State Management**: Fine-grained state selection with useSelector
-- 🧩 **Composable Components**: Ready-to-use components for common auth states
+- 🎭 **Anonymous-First Auth**: Users start with an anonymous session that can be upgraded to a verified account
+- 📧 **Email Verification**: Built-in secure email verification flow with customizable storage and delivery
+- 🔐 **JWT-Based Tokens**: Secure session and refresh tokens with automatic refresh
+- ⚡️ **Edge-Ready**: Designed for Cloudflare Workers with minimal latency
+- 🎯 **Type-Safe**: Full TypeScript support with detailed types
+- 🎨 **React Integration**: Ready-to-use hooks and components for auth state
+- 🔌 **Customizable**: Bring your own storage and email delivery systems
 
 ## 🛠️ Usage Guide
 
@@ -74,7 +72,57 @@ import { createAuthRouter, withAuth } from "auth-kit/worker";
 import { authHooks } from "./auth.server";
 
 // Create the auth router
-const router = createAuthRouter<Env>({ hooks: authHooks });
+const router = createAuthRouter<Env>({
+  hooks: {
+    // Look up a user ID by email address
+    getUserIdByEmail: async ({ email, env, request }) => {
+      // Return the user ID if found, null if no user exists with this email
+      return await env.DB.get(`user:${email}`);
+    },
+
+    // Store a verification code for an email address
+    storeVerificationCode: async ({ email, code, env, request }) => {
+      // Store the code with expiration (e.g. 10 minutes)
+      await env.DB.put(`verification:${email}`, code, { expirationTtl: 600 });
+    },
+
+    // Verify if a code matches what was stored for an email
+    verifyVerificationCode: async ({ email, code, env, request }) => {
+      const storedCode = await env.DB.get(`verification:${email}`);
+      return storedCode === code;
+    },
+
+    // Send a verification code via email
+    sendVerificationCode: async ({ email, code, env, request }) => {
+      try {
+        await sendEmail({
+          to: email,
+          subject: "Your verification code",
+          text: `Your code is: ${code}`
+        });
+        return true;
+      } catch (error) {
+        console.error('Failed to send email:', error);
+        return false;
+      }
+    },
+
+    // Optional: Called when a new anonymous user is created
+    onNewUser: async ({ userId, env, request }) => {
+      await env.DB.put(`user:${userId}`, { created: new Date() });
+    },
+
+    // Optional: Called when a user successfully authenticates with their email code
+    onAuthenticate: async ({ userId, email, env, request }) => {
+      await env.DB.put(`user:${userId}:lastLogin`, new Date());
+    },
+
+    // Optional: Called when a user verifies their email address for the first time
+    onEmailVerified: async ({ userId, email, env, request }) => {
+      await env.DB.put(`user:${userId}:verified`, true);
+    }
+  }
+});
 
 // Wrap your request handler with auth middleware
 export default {
@@ -359,4 +407,67 @@ interface Env {
   AUTH_SECRET: string;
   USER: DurableObjectNamespace;
 }
-``` 
+```
+
+## Required Hooks
+
+The auth router requires the following hooks for email verification:
+
+```typescript
+const authHooks = {
+  // Required: Look up a user ID by email address
+  getUserIdByEmail: async ({ email, env, request }) => {
+    // Return the user ID if found, null if no user exists with this email
+    return await env.DB.get(`user:${email}`);
+  },
+
+  // Required: Store a verification code for an email address
+  storeVerificationCode: async ({ email, code, env, request }) => {
+    // Store the code with expiration (e.g. 10 minutes)
+    await env.DB.put(`verification:${email}`, code, { expirationTtl: 600 });
+  },
+
+  // Required: Verify if a code matches what was stored for an email
+  verifyVerificationCode: async ({ email, code, env, request }) => {
+    const storedCode = await env.DB.get(`verification:${email}`);
+    return storedCode === code;
+  },
+
+  // Required: Send a verification code via email
+  sendVerificationCode: async ({ email, code, env, request }) => {
+    try {
+      await sendEmail({
+        to: email,
+        subject: "Your verification code",
+        text: `Your code is: ${code}`
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to send email:', error);
+      return false;
+    }
+  },
+
+  // Optional: Called when a new anonymous user is created
+  onNewUser?: async ({ userId, env, request }) => {
+    await env.DB.put(`user:${userId}`, { created: new Date() });
+  },
+
+  // Optional: Called when a user successfully authenticates with their email code
+  onAuthenticate?: async ({ userId, email, env, request }) => {
+    await env.DB.put(`user:${userId}:lastLogin`, new Date());
+  },
+
+  // Optional: Called when a user verifies their email address for the first time
+  onEmailVerified?: async ({ userId, email, env, request }) => {
+    await env.DB.put(`user:${userId}:verified`, true);
+  }
+};
+
+// Create the auth router
+const router = createAuthRouter<Env>({ hooks: authHooks });
+
+// ... rest of your code ...
+```
+
+// ... rest of existing README content ... 

@@ -59,34 +59,34 @@ const mockEnv = {
 };
 
 describe('Auth Router', () => {
+  const onNewUser = vi.fn();
+  const onEmailVerified = vi.fn();
+  const onAuthenticate = vi.fn();
+  const getUserIdByEmail = vi.fn().mockImplementation(async ({ email }) => {
+    // For tests, return a fixed user ID for test@example.com
+    return email === 'test@example.com' ? 'test-user' : null;
+  });
+  const storeVerificationCode = vi.fn();
+  const verifyVerificationCode = vi.fn().mockImplementation(async ({ email, code }) => {
+    // For tests, accept '123456' as valid code for any email
+    return code === '123456';
+  });
+  const sendVerificationCode = vi.fn().mockResolvedValue(true);
+
   const router = createAuthRouter<typeof mockEnv>({
     hooks: {
-      onNewUser: vi.fn(),
-      onEmailVerified: vi.fn()
+      onNewUser,
+      onEmailVerified,
+      onAuthenticate,
+      getUserIdByEmail,
+      storeVerificationCode,
+      verifyVerificationCode,
+      sendVerificationCode
     }
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('should handle email verification', async () => {
-    const request = new Request('http://localhost/auth/verify', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        email: 'test@example.com',
-        code: '123456'
-      })
-    });
-
-    const response = await router(request, mockEnv);
-    const data = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(data).toEqual({ success: true });
   });
 
   it('should handle email code request', async () => {
@@ -104,36 +104,176 @@ describe('Auth Router', () => {
     const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(data).toEqual({ success: true });
+    expect(data).toEqual({
+      success: true,
+      message: 'Code sent to email',
+      expiresIn: 600
+    });
+
+    // Verify hooks were called
+    expect(storeVerificationCode).toHaveBeenCalledWith({
+      email: 'test@example.com',
+      code: expect.any(String),
+      env: mockEnv,
+      request
+    });
+    expect(sendVerificationCode).toHaveBeenCalledWith({
+      email: 'test@example.com',
+      code: expect.any(String),
+      env: mockEnv,
+      request
+    });
+  });
+
+  it('should handle email verification for existing user', async () => {
+    const request = new Request('http://localhost/auth/verify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email: 'test@example.com',
+        code: '123456'
+      })
+    });
+
+    const response = await router(request, mockEnv);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({
+      success: true,
+      userId: 'test-user',
+      sessionToken: 'new-session-token',
+      refreshToken: 'new-refresh-token'
+    });
+
+    // Verify hooks were called
+    expect(verifyVerificationCode).toHaveBeenCalledWith({
+      email: 'test@example.com',
+      code: '123456',
+      env: mockEnv,
+      request
+    });
+    expect(onAuthenticate).toHaveBeenCalledWith({
+      userId: 'test-user',
+      email: 'test@example.com',
+      env: mockEnv,
+      request
+    });
+    expect(onEmailVerified).toHaveBeenCalledWith({
+      userId: 'test-user',
+      email: 'test@example.com',
+      env: mockEnv,
+      request
+    });
+  });
+
+  it('should reject email verification with invalid code', async () => {
+    const request = new Request('http://localhost/auth/verify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email: 'test@example.com',
+        code: 'wrong-code'
+      })
+    });
+
+    const response = await router(request, mockEnv);
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe('Invalid or expired code');
+
+    // Verify hooks were called
+    expect(verifyVerificationCode).toHaveBeenCalledWith({
+      email: 'test@example.com',
+      code: 'wrong-code',
+      env: mockEnv,
+      request
+    });
+    // Verify no other hooks were called
+    expect(onAuthenticate).not.toHaveBeenCalled();
+    expect(onEmailVerified).not.toHaveBeenCalled();
+  });
+
+  it('should handle email verification for non-existent user', async () => {
+    const request = new Request('http://localhost/auth/verify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email: 'new-user@example.com',
+        code: '123456'
+      })
+    });
+
+    const response = await router(request, mockEnv);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual({
+      success: true,
+      userId: expect.any(String),
+      sessionToken: 'new-session-token',
+      refreshToken: 'new-refresh-token'
+    });
+
+    // Verify hooks were called
+    expect(onNewUser).toHaveBeenCalledWith({
+      userId: expect.any(String),
+      env: mockEnv,
+      request
+    });
+    expect(onEmailVerified).toHaveBeenCalledWith({
+      userId: expect.any(String),
+      email: 'new-user@example.com',
+      env: mockEnv,
+      request
+    });
   });
 
   it('should handle token refresh with valid refresh token', async () => {
     const request = new Request('http://localhost/auth/refresh', {
       method: 'POST',
-      headers: new Headers({
+      headers: {
         'Authorization': 'Bearer valid-refresh-token'
-      })
+      }
     });
 
     const response = await router(request, mockEnv);
-    expect(response.status).toBe(200);
-    
     const data = await response.json();
+
+    expect(response.status).toBe(200);
     expect(data).toEqual({
-      userId: 'test-user',
+      success: true,
       sessionToken: 'new-session-token',
       refreshToken: 'new-refresh-token'
     });
   });
 
-  it('should reject token refresh without refresh token', async () => {
+  it('should handle token refresh with invalid refresh token', async () => {
+    const request = new Request('http://localhost/auth/refresh', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer invalid-refresh-token'
+      }
+    });
+
+    const response = await router(request, mockEnv);
+    expect(response.status).toBe(401);
+    expect(await response.text()).toBe('Invalid refresh token');
+  });
+
+  it('should handle token refresh without refresh token', async () => {
     const request = new Request('http://localhost/auth/refresh', {
       method: 'POST'
     });
 
     const response = await router(request, mockEnv);
     expect(response.status).toBe(401);
-    expect(await response.text()).toBe('No refresh token');
+    expect(await response.text()).toBe('No refresh token provided');
   });
 
   it('should handle logout', async () => {
@@ -175,7 +315,17 @@ describe('Auth Middleware', () => {
   const middleware = withAuth(mockHandler, {
     hooks: {
       onNewUser: vi.fn(),
-      onEmailVerified: vi.fn()
+      onEmailVerified: vi.fn(),
+      onAuthenticate: vi.fn(),
+      getUserIdByEmail: vi.fn().mockImplementation(async ({ email }) => {
+        // For tests, return a fixed user ID for test@example.com
+        return email === 'test@example.com' ? 'test-user' : null;
+      }),
+      storeVerificationCode: vi.fn(),
+      verifyVerificationCode: vi.fn().mockImplementation(async ({ email, code }) => {
+        return email === 'test@example.com' && code === '123456';
+      }),
+      sendVerificationCode: vi.fn().mockResolvedValue(true)
     }
   });
 
@@ -270,7 +420,19 @@ describe('Auth Middleware', () => {
   it('should call onNewUser hook when creating anonymous user', async () => {
     const onNewUser = vi.fn();
     const middlewareWithHook = withAuth(mockHandler, {
-      hooks: { onNewUser }
+      hooks: { 
+        onNewUser,
+        onEmailVerified: vi.fn(),
+        onAuthenticate: vi.fn(),
+        getUserIdByEmail: vi.fn().mockImplementation(async ({ email }) => {
+          return email === 'test@example.com' ? 'test-user' : null;
+        }),
+        storeVerificationCode: vi.fn(),
+        verifyVerificationCode: vi.fn().mockImplementation(async ({ email, code }) => {
+          return email === 'test@example.com' && code === '123456';
+        }),
+        sendVerificationCode: vi.fn().mockResolvedValue(true)
+      }
     });
 
     const request = new Request('http://localhost/');
