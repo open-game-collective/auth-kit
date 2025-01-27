@@ -59,15 +59,15 @@ declare module "@remix-run/cloudflare" {
 export interface Env {
   // Required for auth-kit
   AUTH_SECRET: string;
-  
+
   // Storage for users and verification codes
   USERS_KV: KVNamespace;
   CODES_KV: KVNamespace;
-  
+
   // Email service (optional)
   SENDGRID_API_KEY?: string;
   RESEND_API_KEY?: string;
-  
+
   // Your other environment variables
   [key: string]: unknown;
 }
@@ -79,12 +79,13 @@ Create your worker entry point that wraps the Remix handler:
 
 ```typescript
 // src/worker.ts
-import { createAuthRouter, withAuth } from "auth-kit/worker";
+import { createAuthRouter, withAuth, type AuthHooks } from "auth-kit/worker";
 import { createRequestHandler } from "@remix-run/cloudflare";
 import * as build from "@remix-run/dev/server-build";
+import type { Env } from "./types/env";
 
-// Configure your auth hooks
-const authHooks = {
+// Configure your auth hooks with proper environment typing
+const authHooks: AuthHooks<Env> = {
   // Required: Look up a user ID by email address
   getUserIdByEmail: async ({ email, env }) => {
     return await env.USERS_KV.get(`email:${email}`);
@@ -92,7 +93,9 @@ const authHooks = {
 
   // Required: Store a verification code
   storeVerificationCode: async ({ email, code, env }) => {
-    await env.CODES_KV.put(`code:${email}`, code, { expirationTtl: 600 });
+    await env.CODES_KV.put(`code:${email}`, code, { 
+      expirationTtl: 600 
+    });
   },
 
   // Required: Verify a code
@@ -104,7 +107,6 @@ const authHooks = {
   // Required: Send verification code via email
   sendVerificationCode: async ({ email, code, env }) => {
     try {
-      // Example using SendGrid:
       const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
         method: "POST",
         headers: {
@@ -120,28 +122,34 @@ const authHooks = {
       });
       return response.ok;
     } catch (error) {
-      console.error('Failed to send email:', error);
+      console.error("Failed to send email:", error);
       return false;
     }
   },
 
   // Optional: Called when new users are created
   onNewUser: async ({ userId, env }) => {
-    await env.USERS_KV.put(`user:${userId}`, JSON.stringify({
-      created: new Date().toISOString()
-    }));
+    await env.USERS_KV.put(
+      `user:${userId}`,
+      JSON.stringify({
+        created: new Date().toISOString(),
+      })
+    );
   },
 
   // Optional: Called on successful authentication
   onAuthenticate: async ({ userId, email, env }) => {
-    await env.USERS_KV.put(`user:${userId}:lastLogin`, new Date().toISOString());
+    await env.USERS_KV.put(
+      `user:${userId}:lastLogin`,
+      new Date().toISOString()
+    );
   },
 
   // Optional: Called when email is verified
   onEmailVerified: async ({ userId, email, env }) => {
-    await env.USERS_KV.put(`user:${userId}:verified`, 'true');
+    await env.USERS_KV.put(`user:${userId}:verified`, "true");
     await env.USERS_KV.put(`email:${email}`, userId);
-  }
+  },
 };
 
 // Create request handler with auth middleware
@@ -149,16 +157,23 @@ const handleRequest = createRequestHandler(build, process.env.NODE_ENV);
 
 // Export the worker with auth middleware
 export default {
-  fetch: withAuth(async (request, env) => {
-    try {
-      // Pass userId and sessionId to Remix loader context
-      const loadContext = { env, userId: env.userId, sessionId: env.sessionId };
-      return await handleRequest(request, loadContext);
-    } catch (error) {
-      console.error("Error processing request:", error);
-      return new Response("Internal Error", { status: 500 });
-    }
-  }, { hooks: authHooks })
+  fetch: withAuth<Env>(
+    async (request, env) => {
+      try {
+        // Pass userId and sessionId to Remix loader context
+        const loadContext = {
+          env,
+          userId: env.userId,
+          sessionId: env.sessionId,
+        };
+        return await handleRequest(request, loadContext);
+      } catch (error) {
+        console.error("Error processing request:", error);
+        return new Response("Internal Error", { status: 500 });
+      }
+    },
+    { hooks: authHooks }
+  ),
 };
 ```
 
@@ -175,20 +190,20 @@ import { useLoaderData } from "@remix-run/react";
 export async function loader({ context }: LoaderFunctionArgs) {
   // Access userId and sessionId from context
   const { userId, sessionId } = context;
-  
+
   // Example: Fetch user data from KV
   const userData = await context.env.USERS_KV.get(`user:${userId}`);
-  
-  return json({ 
+
+  return json({
     userId,
     sessionId,
-    userData: userData ? JSON.parse(userData) : null 
+    userData: userData ? JSON.parse(userData) : null,
   });
 }
 
 export default function Index() {
   const { userId, userData } = useLoaderData<typeof loader>();
-  
+
   return (
     <div>
       <h1>Welcome, {userId}!</h1>
@@ -234,7 +249,7 @@ wrangler deploy
 import { createAuthClient } from "auth-kit/client";
 
 export const authClient = createAuthClient({
-  baseUrl: "https://your-worker.workers.dev"
+  baseUrl: "https://your-worker.workers.dev",
 });
 ```
 
@@ -243,6 +258,7 @@ export const authClient = createAuthClient({
 Auth Kit uses a combination of session tokens (15-minute expiry) and refresh tokens (7-day expiry) to manage authentication state. The system follows an anonymous-first approach where new users are automatically created with a session, which can later be associated with an email through verification.
 
 ### Token Flow
+
 ```mermaid
 sequenceDiagram
     participant Client
@@ -251,7 +267,7 @@ sequenceDiagram
     Client->>Worker: Initial Request
     Worker->>Worker: Create Anonymous User
     Worker->>Client: Set Session & Refresh Tokens
-    
+
     Note over Client,Worker: After 15 minutes...
     Client->>Worker: Request with Expired Session
     Worker->>Worker: Verify Refresh Token
@@ -263,6 +279,7 @@ sequenceDiagram
 ### 🔐 auth-kit/client
 
 #### `createAuthClient(config)`
+
 Creates an auth client instance.
 
 ```typescript
@@ -298,7 +315,9 @@ interface AuthClient {
 #### Auth Router Endpoints
 
 ##### POST /auth/request-code
+
 Request an email verification code.
+
 ```typescript
 // Request
 {
@@ -312,7 +331,9 @@ Request an email verification code.
 ```
 
 ##### POST /auth/verify
+
 Verify an email with a code.
+
 ```typescript
 // Request
 {
@@ -327,7 +348,9 @@ Verify an email with a code.
 ```
 
 ##### POST /auth/refresh
+
 Refresh the session using a refresh token.
+
 ```typescript
 // Request
 Cookie: auth_refresh_token=<token>
@@ -341,7 +364,9 @@ Cookie: auth_refresh_token=<token>
 ```
 
 ##### POST /auth/logout
+
 Log out the current user.
+
 ```typescript
 // Response
 {
@@ -351,6 +376,7 @@ Log out the current user.
 ```
 
 #### Middleware
+
 ```typescript
 const handler = withAuth(requestHandler, {
   hooks?: {
@@ -363,6 +389,7 @@ const handler = withAuth(requestHandler, {
 ### ⚛️ auth-kit/react
 
 #### `createAuthContext()`
+
 Creates a React context with hooks and components for auth state management.
 
 ```typescript
@@ -391,19 +418,21 @@ const AuthContext = createAuthContext();
 ```
 
 #### Using Selectors
+
 ```typescript
 // Select specific state values
-const userId = AuthContext.useSelector(state => state.userId);
-const isVerified = AuthContext.useSelector(state => state.isVerified);
+const userId = AuthContext.useSelector((state) => state.userId);
+const isVerified = AuthContext.useSelector((state) => state.isVerified);
 
 // Select multiple values
-const { userId, isVerified } = AuthContext.useSelector(state => ({
+const { userId, isVerified } = AuthContext.useSelector((state) => ({
   userId: state.userId,
-  isVerified: state.isVerified
+  isVerified: state.isVerified,
 }));
 ```
 
 #### Using State Components
+
 ```typescript
 <AuthContext.Loading>
   <LoadingSpinner />
@@ -413,7 +442,7 @@ const { userId, isVerified } = AuthContext.useSelector(state => ({
   <AuthContext.Verified>
     <VerifiedUserContent />
   </AuthContext.Verified>
-  
+
   <AuthContext.Unverified>
     <EmailVerificationFlow />
   </AuthContext.Unverified>
@@ -423,6 +452,7 @@ const { userId, isVerified } = AuthContext.useSelector(state => ({
 ## 🔑 TypeScript Types
 
 ### Auth State
+
 ```typescript
 type AuthState = {
   isInitializing: boolean;
@@ -447,6 +477,7 @@ type AuthState = {
 ```
 
 ### Environment Types
+
 ```typescript
 interface Env {
   AUTH_SECRET: string;
@@ -484,29 +515,29 @@ const authHooks = {
       await sendEmail({
         to: email,
         subject: "Your verification code",
-        text: `Your code is: ${code}`
+        text: `Your code is: ${code}`,
       });
       return true;
     } catch (error) {
-      console.error('Failed to send email:', error);
+      console.error("Failed to send email:", error);
       return false;
     }
   },
 
   // Optional: Called when a new anonymous user is created
-  onNewUser?: async ({ userId, env, request }) => {
+  onNewUser: async ({ userId, env, request }) => {
     await env.DB.put(`user:${userId}`, { created: new Date() });
   },
 
   // Optional: Called when a user successfully authenticates with their email code
-  onAuthenticate?: async ({ userId, email, env, request }) => {
+  onAuthenticate: async ({ userId, email, env, request }) => {
     await env.DB.put(`user:${userId}:lastLogin`, new Date());
   },
 
   // Optional: Called when a user verifies their email address for the first time
-  onEmailVerified?: async ({ userId, email, env, request }) => {
+  onEmailVerified: async ({ userId, email, env, request }) => {
     await env.DB.put(`user:${userId}:verified`, true);
-  }
+  },
 };
 
 // Create the auth router
@@ -515,4 +546,4 @@ const router = createAuthRouter<Env>({ hooks: authHooks });
 // ... rest of your code ...
 ```
 
-// ... rest of existing README content ... 
+// ... rest of existing README content ...
