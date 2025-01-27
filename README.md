@@ -11,7 +11,7 @@ A full-stack authentication toolkit for React applications. Built on Cloudflare 
   - [2️⃣ Set up Worker Entry Point](#2️⃣-set-up-worker-entry-point)
   - [3️⃣ Access Auth in Remix Routes](#3️⃣-access-auth-in-remix-routes)
   - [4️⃣ Configure Worker](#4️⃣-configure-worker)
-  - [5️⃣ Set up Auth Client](#5️⃣-set-up-auth-client)
+  - [5️⃣ Set up Auth Client and React Integration](#5️⃣-set-up-auth-client-and-react-integration)
 - [🏗️ Architecture](#️-architecture)
 - [📖 API Reference](#-api-reference)
   - [🔐 auth-kit/client](#-auth-kitclient)
@@ -242,7 +242,9 @@ Deploy your worker:
 wrangler deploy
 ```
 
-### 5️⃣ Set up Auth Client
+### 5️⃣ Set up Auth Client and React Integration
+
+First, create your auth client:
 
 ```typescript
 // app/auth.client.ts
@@ -252,6 +254,172 @@ export const authClient = createAuthClient({
   baseUrl: "https://your-worker.workers.dev",
 });
 ```
+
+Then create your auth context:
+
+```typescript
+// app/auth.context.ts
+import { createAuthContext } from "auth-kit/react";
+
+export const AuthContext = createAuthContext();
+```
+
+Set up the provider in your root component:
+
+```typescript
+// app/root.tsx
+import { AuthContext } from "./auth.context";
+import { authClient } from "./auth.client";
+
+export default function App() {
+  return (
+    <AuthContext.Provider client={authClient}>
+      <html>
+        <head>
+          <Meta />
+          <Links />
+        </head>
+        <body>
+          <Outlet />
+          <ScrollRestoration />
+          <Scripts />
+          <LiveReload />
+        </body>
+      </html>
+    </AuthContext.Provider>
+  );
+}
+```
+
+Now you can use the auth hooks and components in your routes:
+
+```typescript
+// app/routes/profile.tsx
+import { AuthContext } from "~/auth.context";
+
+export default function Profile() {
+  // Use the useSelector hook for fine-grained state updates
+  const userId = AuthContext.useSelector(state => state.userId);
+  const isVerified = AuthContext.useSelector(state => state.isVerified);
+  
+  // Or use the useAuth hook for all auth state and methods
+  const { requestCode, verifyEmail, logout } = AuthContext.useAuth();
+
+  const handleVerify = async (email: string, code: string) => {
+    try {
+      await verifyEmail(email, code);
+      // Handle success
+    } catch (error) {
+      // Handle error
+    }
+  };
+
+  return (
+    <div>
+      <h1>Profile</h1>
+      
+      {/* Show loading state */}
+      <AuthContext.Loading>
+        <div>Loading...</div>
+      </AuthContext.Loading>
+
+      {/* Only show when user is authenticated */}
+      <AuthContext.Authenticated>
+        <p>User ID: {userId}</p>
+        
+        {/* Content for verified users */}
+        <AuthContext.Verified>
+          <div>
+            <h2>Welcome back!</h2>
+            <button onClick={logout}>Logout</button>
+          </div>
+        </AuthContext.Verified>
+        
+        {/* Email verification flow for unverified users */}
+        <AuthContext.Unverified>
+          <div>
+            <h2>Verify your email</h2>
+            <EmailVerificationForm onVerify={handleVerify} />
+          </div>
+        </AuthContext.Unverified>
+      </AuthContext.Authenticated>
+    </div>
+  );
+}
+
+// Example email verification form
+function EmailVerificationForm({ onVerify }: { onVerify: (email: string, code: string) => Promise<void> }) {
+  const { requestCode } = AuthContext.useAuth();
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [step, setStep] = useState<"email" | "code">("email");
+
+  const handleRequestCode = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      await requestCode(email);
+      setStep("code");
+    } catch (error) {
+      // Handle error
+    }
+  };
+
+  const handleVerifyCode = async (e: FormEvent) => {
+    e.preventDefault();
+    await onVerify(email, code);
+  };
+
+  if (step === "email") {
+    return (
+      <form onSubmit={handleRequestCode}>
+        <input
+          type="email"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          placeholder="Enter your email"
+        />
+        <button type="submit">Send Code</button>
+      </form>
+    );
+  }
+
+  return (
+    <form onSubmit={handleVerifyCode}>
+      <input
+        type="text"
+        value={code}
+        onChange={e => setCode(e.target.value)}
+        placeholder="Enter verification code"
+      />
+      <button type="submit">Verify</button>
+    </form>
+  );
+}
+```
+
+The React integration provides:
+
+1. **State Management**
+   - `useSelector`: Subscribe to specific parts of auth state
+   - `useAuth`: Access all auth state and methods
+   - `useClient`: Direct access to auth client (advanced usage)
+
+2. **Conditional Components**
+   - `<AuthContext.Loading>`: Show during auth operations
+   - `<AuthContext.Authenticated>`: Only render for authenticated users
+   - `<AuthContext.Verified>`: Only render for verified users
+   - `<AuthContext.Unverified>`: Only render for unverified users
+
+3. **Auth Methods**
+   - `requestCode`: Request email verification code
+   - `verifyEmail`: Verify email with code
+   - `logout`: Log out current user
+   - `refresh`: Manually refresh session token
+
+4. **Type Safety**
+   - Full TypeScript support
+   - Autocomplete for state and methods
+   - Type inference for selectors
 
 ## 🏗️ Architecture
 
@@ -485,9 +653,9 @@ interface Env {
 }
 ```
 
-## Required Hooks
+## Hooks
 
-The auth router requires the following hooks for email verification:
+The auth router takes the following hooks (some are required, others are optional):
 
 ```typescript
 const authHooks = {
@@ -545,5 +713,3 @@ const router = createAuthRouter<Env>({ hooks: authHooks });
 
 // ... rest of your code ...
 ```
-
-// ... rest of existing README content ...
