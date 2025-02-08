@@ -5,8 +5,7 @@ import React, {
   useCallback,
   useContext,
   useMemo,
-  useRef,
-  useSyncExternalStore,
+  useSyncExternalStore
 } from "react";
 import type { AuthClient } from "./client";
 import type { AuthState } from "./types";
@@ -16,12 +15,10 @@ export function createAuthContext() {
 
   const Provider = memo(({ 
     children, 
-    client,
-    initializing 
+    client 
   }: { 
     children: ReactNode;
     client: AuthClient;
-    initializing?: ReactNode;
   }) => {
     return (
       <AuthContext.Provider value={client}>

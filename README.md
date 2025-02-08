@@ -508,7 +508,7 @@ This architecture provides:
 
 #### `createAuthClient(config)`
 
-Creates an auth client instance.
+Creates an auth client instance for managing auth state and operations.
 
 ```typescript
 interface AuthClientConfig {
@@ -521,7 +521,7 @@ interface AuthClientConfig {
 const client = createAuthClient(config);
 ```
 
-#### Client Methods
+The client provides:
 
 ```typescript
 interface AuthClient {
@@ -538,7 +538,80 @@ interface AuthClient {
 }
 ```
 
+Example usage:
+```typescript
+const client = createAuthClient({
+  baseUrl: "https://your-worker.workers.dev",
+  onStateChange: (state) => {
+    console.log("Auth state changed:", state);
+  },
+  onError: (error) => {
+    console.error("Auth error:", error);
+  }
+});
+
+// Request verification code
+await client.requestCode("user@example.com");
+
+// Verify email
+const result = await client.verifyEmail("user@example.com", "123456");
+if (result.success) {
+  console.log("Email verified!");
+}
+
+// Subscribe to state changes
+const unsubscribe = client.subscribe((state) => {
+  if (state.isVerified) {
+    console.log("User is verified!");
+  }
+});
+```
+
+The client automatically:
+- Manages auth state
+- Handles token refresh
+- Provides error handling
+- Supports state subscriptions
+
 ### 🖥️ auth-kit/worker
+
+#### `withAuth<TEnv>(handler, config)`
+
+Creates a middleware that handles authentication and provides user context:
+
+```typescript
+function withAuth<TEnv extends { AUTH_SECRET: string }>(
+  handler: (
+    request: Request,
+    env: TEnv,
+    auth: { userId: string; sessionId: string }
+  ) => Promise<Response>,
+  config: {
+    hooks: AuthHooks<TEnv>;
+  }
+): (request: Request, env: TEnv) => Promise<Response>;
+```
+
+The middleware:
+1. Handles all `/auth/*` routes automatically
+2. Creates anonymous users for new visitors
+3. Manages session (15m) and refresh (7d) tokens
+4. Provides `userId` and `sessionId` to your handler
+5. Sets secure HTTP-only cookies for tokens
+
+Example usage:
+```typescript
+export default {
+  fetch: withAuth<Env>(
+    async (request, env, { userId, sessionId }) => {
+      // Pass auth context to Remix loader context
+      const loadContext = { env, userId, sessionId };
+      return await handleRequest(request, loadContext);
+    },
+    { hooks: authHooks }
+  ),
+};
+```
 
 #### Auth Router Endpoints
 
@@ -603,66 +676,34 @@ Log out the current user.
 // + Cleared cookies
 ```
 
-#### Middleware
-
-```typescript
-const handler = withAuth<TEnv>(
-  // Handler receives userId and sessionId as third argument
-  async (
-    request: Request, 
-    env: TEnv, 
-    { userId, sessionId }: { userId: string; sessionId: string }
-  ) => Promise<Response>,
-  { 
-    hooks: AuthHooks<TEnv>
-  }
-);
-```
-
-The middleware:
-1. Handles all `/auth/*` routes automatically
-2. Creates anonymous users for new visitors
-3. Manages session and refresh tokens
-4. Provides `userId` and `sessionId` to your handler
-5. Sets cookies for new/refreshed tokens
-
-Example usage:
-```typescript
-export default {
-  fetch: withAuth<Env>(
-    async (request, env, { userId, sessionId }) => {
-      // Use userId and sessionId in your handler
-      return new Response(`Hello ${userId}!`);
-    },
-    { hooks: authHooks }
-  ),
-};
-```
-
 ### ⚛️ auth-kit/react
 
 #### `createAuthContext()`
 
-Creates a React context with hooks and components for auth state management.
+Creates a React context with hooks and components for auth state management:
 
 ```typescript
 const AuthContext = createAuthContext();
 
 // Returns:
 {
-  // Core Provider Component
+  // Provider Component
   Provider: React.FC<{
     children: ReactNode;
     client: AuthClient;
-    initializing?: ReactNode;
   }>;
 
   // Hooks
   useClient(): AuthClient;
   useSelector<T>(selector: (state: AuthState) => T): T;
-  useAuth(): AuthState & AuthMethods;
+  useAuth(): AuthState & {
+    requestCode: (email: string) => Promise<void>;
+    verifyEmail: (email: string, code: string) => Promise<{ success: boolean }>;
+    logout: () => Promise<void>;
+    refresh: () => Promise<void>;
+  };
 
-  // State-Based Components
+  // Conditional Components
   Loading: React.FC<{ children: ReactNode }>;
   Verified: React.FC<{ children: ReactNode }>;
   Unverified: React.FC<{ children: ReactNode }>;
@@ -670,37 +711,89 @@ const AuthContext = createAuthContext();
 }
 ```
 
-#### Using Selectors
+Example usage:
 
 ```typescript
-// Select specific state values
-const userId = AuthContext.useSelector((state) => state.userId);
-const isVerified = AuthContext.useSelector((state) => state.isVerified);
+// Create context
+const AuthContext = createAuthContext();
 
-// Select multiple values
-const { userId, isVerified } = AuthContext.useSelector((state) => ({
-  userId: state.userId,
-  isVerified: state.isVerified,
-}));
+// Set up provider
+function App() {
+  return (
+    <AuthContext.Provider client={authClient}>
+      <Routes />
+    </AuthContext.Provider>
+  );
+}
+
+// Use hooks in components
+function Profile() {
+  // Use selectors for fine-grained updates
+  const userId = AuthContext.useSelector(state => state.userId);
+  const isVerified = AuthContext.useSelector(state => state.isVerified);
+  
+  // Or use useAuth for all state and methods
+  const { 
+    requestCode, 
+    verifyEmail,
+    logout,
+    isLoading 
+  } = AuthContext.useAuth();
+
+  return (
+    <div>
+      {/* Show loading states */}
+      <AuthContext.Loading>
+        <LoadingSpinner />
+      </AuthContext.Loading>
+
+      {/* Only show for authenticated users */}
+      <AuthContext.Authenticated>
+        <p>User ID: {userId}</p>
+        
+        {/* Content for verified users */}
+        <AuthContext.Verified>
+          <div>
+            <h2>Welcome back!</h2>
+            <button onClick={logout}>Logout</button>
+          </div>
+        </AuthContext.Verified>
+        
+        {/* Email verification flow */}
+        <AuthContext.Unverified>
+          <EmailVerificationForm 
+            onRequestCode={requestCode}
+            onVerify={verifyEmail}
+            isLoading={isLoading}
+          />
+        </AuthContext.Unverified>
+      </AuthContext.Authenticated>
+    </div>
+  );
+}
 ```
 
-#### Using State Components
+The React integration provides:
 
-```typescript
-<AuthContext.Loading>
-  <LoadingSpinner />
-</AuthContext.Loading>
+1. **Efficient State Management**
+   - Fine-grained updates with `useSelector`
+   - Automatic state synchronization
+   - Memoized selectors for performance
 
-<AuthContext.Authenticated>
-  <AuthContext.Verified>
-    <VerifiedUserContent />
-  </AuthContext.Verified>
+2. **Type-Safe Hooks**
+   - Full TypeScript support
+   - Autocomplete for state and methods
+   - Type inference for selectors
 
-  <AuthContext.Unverified>
-    <EmailVerificationFlow />
-  </AuthContext.Unverified>
-</AuthContext.Authenticated>
-```
+3. **Conditional Rendering**
+   - Loading states with `<Loading>`
+   - Authentication gates with `<Authenticated>`
+   - Verification flows with `<Verified>` and `<Unverified>`
+
+4. **Developer Experience**
+   - Simple provider setup
+   - Intuitive hook-based API
+   - Automatic error handling
 
 ## 🔑 TypeScript Types
 
