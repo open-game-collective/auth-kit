@@ -47,23 +47,6 @@ export function createAuthContext() {
     );
   }
 
-  function useAuth() {
-    const client = useClient();
-    const state = useSelector(state => state);
-
-    const methods = useMemo(() => ({
-      requestCode: client.requestCode.bind(client),
-      verifyEmail: client.verifyEmail.bind(client),
-      logout: client.logout.bind(client),
-      refresh: client.refresh.bind(client),
-    }), [client]);
-
-    return {
-      ...state,
-      ...methods
-    };
-  }
-
   const Loading = memo(({ children }: { children: ReactNode }) => {
     const isLoading = useSelector(state => state.isLoading);
     return isLoading ? <>{children}</> : null;
@@ -92,7 +75,6 @@ export function createAuthContext() {
     Provider,
     useClient,
     useSelector,
-    useAuth,
     Loading,
     Verified,
     Unverified,

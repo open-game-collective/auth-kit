@@ -7,11 +7,10 @@ A full-stack authentication toolkit for React applications. Built on Cloudflare 
 - [💾 Installation](#-installation)
 - [🌟 Key Features](#-key-features)
 - [🛠️ Usage Guide](#️-usage-guide)
-  - [1️⃣ Set up Environment Types](#1️⃣-set-up-environment-types)
-  - [2️⃣ Set up Worker Entry Point](#2️⃣-set-up-worker-entry-point)
-  - [3️⃣ Access Auth in Remix Routes](#3️⃣-access-auth-in-remix-routes)
-  - [4️⃣ Configure Worker](#4️⃣-configure-worker)
-  - [5️⃣ Set up Auth Client and React Integration](#5️⃣-set-up-auth-client-and-react-integration)
+  - [1️⃣ Set up Environment and Worker](#1️⃣-set-up-environment-and-worker)
+  - [2️⃣ Access Auth in Remix Routes](#2️⃣-access-auth-in-remix-routes)
+  - [3️⃣ Configure Worker](#3️⃣-configure-worker)
+  - [4️⃣ Set up Auth Client and React Integration](#4️⃣-set-up-auth-client-and-react-integration)
 - [🏗️ Architecture](#️-architecture)
 - [📖 API Reference](#-api-reference)
   - [🔐 auth-kit/client](#-auth-kitclient)
@@ -29,12 +28,6 @@ yarn add auth-kit
 pnpm add auth-kit
 ```
 
-Optional: If you want to use environment validation with Zod (as shown in the examples):
-
-```bash
-npm install zod
-```
-
 ## 🌟 Key Features
 
 - 🎭 **Anonymous-First Auth**: Users start with an anonymous session that can be upgraded to a verified account
@@ -47,7 +40,9 @@ npm install zod
 
 ## 🛠️ Usage Guide
 
-### 1️⃣ Set up Environment Types
+### 1️⃣ Set up Environment and Worker
+
+#### Environment Types
 
 First, set up your environment types:
 
@@ -58,6 +53,8 @@ First, set up your environment types:
 declare module "@remix-run/cloudflare" {
   interface AppLoadContext {
     env: Env;
+
+    // The 3 context parameters we inject in the withAuth middleware
     userId: string;
     sessionId: string;
     pageSessionId: string;
@@ -73,13 +70,12 @@ export interface Env {
   // KV Storage for auth data
   KV_STORAGE: KVNamespace;
   
-  // Your Durable Objects
-  REMIX: DurableObjectNamespace;
-  
   // Your other environment variables
   [key: string]: unknown;
 }
 ```
+
+#### Worker Entry Point
 
 Then create your worker entry point:
 
@@ -87,7 +83,7 @@ Then create your worker entry point:
 // app/worker.ts
 import { createRequestHandler, logDevReady } from "@remix-run/cloudflare";
 import * as build from "@remix-run/dev/server-build";
-import { AuthHooks, withAuth } from "auth-kit/worker";
+import { AuthHooks, withAuth } from "@open-game-collective/auth-kit/worker";
 import type { Env } from "./env";
 
 if (process.env.NODE_ENV === "development") {
@@ -159,6 +155,7 @@ const authHooks: AuthHooks<Env> = {
 const handler = withAuth<Env>(
   async (request, env, { userId, sessionId }) => {
     try {
+      // Inject the userId, sessionId, and pageSessionId into the request context
       return await handleRemixRequest(request, {
         env,
         userId,
@@ -173,24 +170,10 @@ const handler = withAuth<Env>(
   { hooks: authHooks }
 );
 
-// Durable Object implementation
-export class RemixDO extends DurableObject<Env> {
-  constructor(state: DurableObjectState, env: Env) {
-    super(state, env);
-  }
-
-  async fetch(request: Request): Promise<Response> {
-    return handler(request, this.env);
-  }
-}
-
 // Worker entry point
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    // Route all requests through the Durable Object
-    const id = env.REMIX.idFromName("default");
-    const remixDO = env.REMIX.get(id);
-    return remixDO.fetch(request);
+    return handler(request, this.env);
   },
 } satisfies ExportedHandler<Env>;
 ```
@@ -213,7 +196,7 @@ new_classes = ["RemixDO"]
 
 [vars]
 NODE_ENV = "development"
-WEB_HOST = "http://localhost:8787"
+WEB_HOST = "localhost:8787"
 
 # KV Namespace for auth storage
 kv_namespaces = [
@@ -221,115 +204,12 @@ kv_namespaces = [
 ]
 
 # Secrets (use wrangler secret put for production)
+# Put in .dev.vars
 # - AUTH_SECRET
 # - SENDGRID_API_KEY
 ```
 
-### 2️⃣ Set up Worker Entry Point
-
-Create your worker entry point that wraps the Remix handler:
-
-```typescript
-// src/worker.ts
-import { createAuthRouter, withAuth, type AuthHooks } from "auth-kit/worker";
-import { createRequestHandler } from "@remix-run/cloudflare";
-import * as build from "@remix-run/dev/server-build";
-import type { Env } from "./types/env";
-
-// Configure your auth hooks with proper environment typing
-const authHooks: AuthHooks<Env> = {
-  // Required: Look up a user ID by email address
-  getUserIdByEmail: async ({ email, env }) => {
-    return await env.USERS_KV.get(`email:${email}`);
-  },
-
-  // Required: Store a verification code
-  storeVerificationCode: async ({ email, code, env }) => {
-    await env.CODES_KV.put(`code:${email}`, code, { 
-      expirationTtl: 600 
-    });
-  },
-
-  // Required: Verify a code
-  verifyVerificationCode: async ({ email, code, env }) => {
-    const storedCode = await env.CODES_KV.get(`code:${email}`);
-    return storedCode === code;
-  },
-
-  // Required: Send a verification code via email
-  sendVerificationCode: async ({ email, code, env, request }) => {
-    try {
-      const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.SENDGRID_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          personalizations: [{ to: [{ email }] }],
-          from: { email: "auth@yourdomain.com" },
-          subject: "Your verification code",
-          content: [{ type: "text/plain", value: `Your code is: ${code}` }],
-        }),
-      });
-      return response.ok;
-    } catch (error) {
-      console.error("Failed to send email:", error);
-      return false;
-    }
-  },
-
-  // Optional: Called when new users are created
-  onNewUser: async ({ userId, env }) => {
-    await env.USERS_KV.put(
-      `user:${userId}`,
-      JSON.stringify({
-        created: new Date().toISOString(),
-      })
-    );
-  },
-
-  // Optional: Called on successful authentication
-  onAuthenticate: async ({ userId, email, env }) => {
-    await env.USERS_KV.put(
-      `user:${userId}:lastLogin`,
-      new Date().toISOString()
-    );
-  },
-
-  // Optional: Called when email is verified
-  onEmailVerified: async ({ userId, email, env }) => {
-    await env.USERS_KV.put(`user:${userId}:verified`, "true");
-    await env.USERS_KV.put(`email:${email}`, userId);
-  },
-};
-
-// Create request handler with auth middleware
-const handleRequest = createRequestHandler(build, process.env.NODE_ENV);
-
-// Export the worker with auth middleware
-export default {
-  fetch: withAuth<Env>(
-    async (request, env, { userId, sessionId }) => {
-      try {
-        // Pass userId and sessionId to Remix loader context
-        const loadContext = {
-          env,
-          userId,
-          sessionId,
-        };
-        return await handleRequest(request, loadContext);
-      } catch (error) {
-        console.error("Error processing request:", error);
-        return new Response("Internal Error", { status: 500 });
-      }
-    },
-    { hooks: authHooks }
-  ),
-};
-```
-
-### 3️⃣ Access Auth in Remix Routes
+### 2️⃣ Access Auth in Remix Routes
 
 Now you can access the authenticated user in your Remix routes:
 
@@ -365,45 +245,16 @@ export default function Index() {
 }
 ```
 
-### 4️⃣ Configure Worker
-
-Configure your worker in `wrangler.toml`:
-
-```toml
-name = "my-remix-app"
-main = "src/worker.ts"
-compatibility_date = "2024-01-01"
-
-[vars]
-NODE_ENV = "development"
-
-# KV Namespaces for auth storage
-kv_namespaces = [
-  { binding = "USERS_KV", id = "..." },
-  { binding = "CODES_KV", id = "..." }
-]
-
-# Secrets (use wrangler secret put for production)
-# - AUTH_SECRET
-# - SENDGRID_API_KEY
-```
-
-Deploy your worker:
-
-```bash
-wrangler deploy
-```
-
-### 5️⃣ Set up Auth Client and React Integration
+### 4️⃣ Set up Auth Client and React Integration
 
 First, create your auth client:
 
 ```typescript
 // app/auth.client.ts
-import { createAuthClient } from "auth-kit/client";
+import { createAuthClient } from "@open-game-collective/auth-kit/client";
 
 export const authClient = createAuthClient({
-  baseUrl: "https://your-worker.workers.dev",
+  host: "localhost:8787",
 });
 ```
 
@@ -411,7 +262,7 @@ Then create your auth context:
 
 ```typescript
 // app/auth.context.ts
-import { createAuthContext } from "auth-kit/react";
+import { createAuthContext } from "@open-game-collective/auth-kit/react";
 
 export const AuthContext = createAuthContext();
 ```
@@ -450,32 +301,22 @@ Now you can use the auth hooks and components in your routes:
 import { AuthContext } from "~/auth.context";
 
 export default function Profile() {
-  // Use the useSelector hook for fine-grained state updates
+  // Access the auth client for methods
+  const client = AuthContext.useClient();
+  
+  // Use selectors for state updates
   const userId = AuthContext.useSelector(state => state.userId);
+  const isLoading = AuthContext.useSelector(state => state.isLoading);
   const isVerified = AuthContext.useSelector(state => state.isVerified);
   
-  // Or use the useAuth hook for all auth state and methods
-  const { requestCode, verifyEmail, logout } = AuthContext.useAuth();
-
-  const handleVerify = async (email: string, code: string) => {
-    try {
-      await verifyEmail(email, code);
-      // Handle success
-    } catch (error) {
-      // Handle error
-    }
-  };
-
   return (
     <div>
-      <h1>Profile</h1>
-      
-      {/* Show loading state */}
+      {/* Show loading states */}
       <AuthContext.Loading>
-        <div>Loading...</div>
+        <LoadingSpinner />
       </AuthContext.Loading>
 
-      {/* Only show when user is authenticated */}
+      {/* Only show for authenticated users */}
       <AuthContext.Authenticated>
         <p>User ID: {userId}</p>
         
@@ -483,16 +324,17 @@ export default function Profile() {
         <AuthContext.Verified>
           <div>
             <h2>Welcome back!</h2>
-            <button onClick={logout}>Logout</button>
+            <button onClick={() => client.logout()}>Logout</button>
           </div>
         </AuthContext.Verified>
         
         {/* Email verification flow for unverified users */}
         <AuthContext.Unverified>
-          <div>
-            <h2>Verify your email</h2>
-            <EmailVerificationForm onVerify={handleVerify} />
-          </div>
+          <EmailVerificationForm 
+            onRequestCode={() => client.requestCode('user@example.com')}
+            onVerify={(email, code) => client.verifyEmail(email, code)}
+            isLoading={isLoading}
+          />
         </AuthContext.Unverified>
       </AuthContext.Authenticated>
     </div>
@@ -500,20 +342,16 @@ export default function Profile() {
 }
 
 // Example email verification form
-function EmailVerificationForm({ onVerify }: { onVerify: (email: string, code: string) => Promise<void> }) {
-  const { requestCode } = AuthContext.useAuth();
+function EmailVerificationForm({ onRequestCode, onVerify }: { onRequestCode: (email: string) => Promise<void>; onVerify: (email: string, code: string) => Promise<void>; }) {
+  // Note: The auth client methods (requestCode, verifyEmail, etc.) are asynchronous, so they must be awaited.
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const [step, setStep] = useState<"email" | "code">("email");
+  const [hasRequested, setHasRequested] = useState(false);
 
   const handleRequestCode = async (e: FormEvent) => {
     e.preventDefault();
-    try {
-      await requestCode(email);
-      setStep("code");
-    } catch (error) {
-      // Handle error
-    }
+    await onRequestCode(email);
+    setHasRequested(true);
   };
 
   const handleVerifyCode = async (e: FormEvent) => {
@@ -521,30 +359,30 @@ function EmailVerificationForm({ onVerify }: { onVerify: (email: string, code: s
     await onVerify(email, code);
   };
 
-  if (step === "email") {
-    return (
-      <form onSubmit={handleRequestCode}>
-        <input
-          type="email"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          placeholder="Enter your email"
-        />
-        <button type="submit">Send Code</button>
-      </form>
-    );
-  }
-
   return (
-    <form onSubmit={handleVerifyCode}>
-      <input
-        type="text"
-        value={code}
-        onChange={e => setCode(e.target.value)}
-        placeholder="Enter verification code"
-      />
-      <button type="submit">Verify</button>
-    </form>
+    <div>
+      {!hasRequested ? (
+        <form onSubmit={handleRequestCode}>
+          <input
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="Enter your email"
+          />
+          <button type="submit">Send Code</button>
+        </form>
+      ) : (
+        <form onSubmit={handleVerifyCode}>
+          <input
+            type="text"
+            value={code}
+            onChange={e => setCode(e.target.value)}
+            placeholder="Enter verification code"
+          />
+          <button type="submit">Verify Code</button>
+        </form>
+      )}
+    </div>
   );
 }
 ```
@@ -553,7 +391,6 @@ The React integration provides:
 
 1. **State Management**
    - `useSelector`: Subscribe to specific parts of auth state
-   - `useAuth`: Access all auth state and methods
    - `useClient`: Direct access to auth client (advanced usage)
 
 2. **Conditional Components**
@@ -654,6 +491,16 @@ This architecture provides:
 - 🎯 Type-safe integration with Remix
 - 🎨 Efficient React state management
 
+### Platform Differences: Web vs. Mobile
+
+Auth Kit provides flexible authentication flows to cater to the specific requirements of different platforms.
+
+- **Web Platforms:** For web applications, the `withAuth` middleware automatically handles user session initialization. When a user visits your site, the middleware checks for an existing session token, and if none is found, it generates a new anonymous user, creates a session, and sets secure HTTP-only cookies with the `sessionToken` and `refreshToken`.
+
+- **Mobile Platforms:** In mobile applications, cookies are typically not used in the same way. Instead, you should explicitly call the `createAnonymousUser` function available from the auth client. This function returns an object containing the `userId`, `sessionToken`, and `refreshToken`, which you can then securely store and manage within your mobile app.
+
+This distinction allows you to optimize the authentication flow based on the specific needs of your platform.
+
 ## 📖 API Reference
 
 ### 🔐 auth-kit/client
@@ -664,7 +511,7 @@ Creates an auth client instance for managing auth state and operations.
 
 ```typescript
 interface AuthClientConfig {
-  baseUrl: string;
+  host: string;
   initialState?: Partial<AuthState>;
   onStateChange?: (state: AuthState) => void;
   onError?: (error: Error) => void;
@@ -693,7 +540,7 @@ interface AuthClient {
 Example usage:
 ```typescript
 const client = createAuthClient({
-  baseUrl: "https://your-worker.workers.dev",
+  host: "localhost:8787",
   onStateChange: (state) => {
     console.log("Auth state changed:", state);
   },
@@ -724,6 +571,27 @@ The client automatically:
 - Handles token refresh
 - Provides error handling
 - Supports state subscriptions
+
+### Creating an Anonymous User
+
+The auth client now provides a method called `createAnonymousUser` that always returns an object containing the full set of authentication tokens: `userId`, `sessionToken`, and `refreshToken`. This ensures that every time an anonymous user is generated, all three tokens are available for subsequent authentication flows.
+
+You can also optionally pass a configuration object with a `refreshTokenExpiration` property (in seconds) to specify a custom expiration time for the refresh token. This allows you to tailor token lifetimes based on your application's requirements—mobile clients might require a longer refresh token, while web clients might use a shorter one.
+
+Example usage:
+
+```typescript
+// For a web client with a shorter refresh token lifespan (e.g., 24 hours)
+const anonymousUser = await client.createAnonymousUser({ refreshTokenExpiration: 86400 });
+console.log(anonymousUser);
+// { userId: '...', sessionToken: '...', refreshToken: '...' }
+
+// For a mobile client with a longer refresh token lifespan (e.g., 7 days)
+const mobileUser = await client.createAnonymousUser({ refreshTokenExpiration: 604800 });
+console.log(mobileUser);
+```
+
+This update ensures that anonymous users are always provided with the complete set of tokens required for secure session management.
 
 ### 🖥️ auth-kit/worker
 
@@ -837,7 +705,7 @@ Creates a React context with hooks and components for auth state management:
 ```typescript
 const AuthContext = createAuthContext();
 
-// Returns:
+// Returned object structure:
 {
   // Provider Component
   Provider: React.FC<{
@@ -848,12 +716,6 @@ const AuthContext = createAuthContext();
   // Hooks
   useClient(): AuthClient;
   useSelector<T>(selector: (state: AuthState) => T): T;
-  useAuth(): AuthState & {
-    requestCode: (email: string) => Promise<void>;
-    verifyEmail: (email: string, code: string) => Promise<{ success: boolean }>;
-    logout: () => Promise<void>;
-    refresh: () => Promise<void>;
-  };
 
   // Conditional Components
   Loading: React.FC<{ children: ReactNode }>;
@@ -862,6 +724,8 @@ const AuthContext = createAuthContext();
   Authenticated: React.FC<{ children: ReactNode }>;
 }
 ```
+
+Instead of a combined `useAuth` hook, you can use `useClient` to access auth methods and `useSelector` to subscribe to state updates as needed.
 
 Example usage:
 
@@ -880,18 +744,14 @@ function App() {
 
 // Use hooks in components
 function Profile() {
-  // Use selectors for fine-grained updates
+  // Access the auth client for methods
+  const client = AuthContext.useClient();
+  
+  // Use selectors for state updates
   const userId = AuthContext.useSelector(state => state.userId);
+  const isLoading = AuthContext.useSelector(state => state.isLoading);
   const isVerified = AuthContext.useSelector(state => state.isVerified);
   
-  // Or use useAuth for all state and methods
-  const { 
-    requestCode, 
-    verifyEmail,
-    logout,
-    isLoading 
-  } = AuthContext.useAuth();
-
   return (
     <div>
       {/* Show loading states */}
@@ -907,15 +767,15 @@ function Profile() {
         <AuthContext.Verified>
           <div>
             <h2>Welcome back!</h2>
-            <button onClick={logout}>Logout</button>
+            <button onClick={() => client.logout()}>Logout</button>
           </div>
         </AuthContext.Verified>
         
-        {/* Email verification flow */}
+        {/* Email verification flow for unverified users */}
         <AuthContext.Unverified>
           <EmailVerificationForm 
-            onRequestCode={requestCode}
-            onVerify={verifyEmail}
+            onRequestCode={() => client.requestCode('user@example.com')}
+            onVerify={(email, code) => client.verifyEmail(email, code)}
             isLoading={isLoading}
           />
         </AuthContext.Unverified>
