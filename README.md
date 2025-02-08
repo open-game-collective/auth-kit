@@ -158,13 +158,13 @@ const handleRequest = createRequestHandler(build, process.env.NODE_ENV);
 // Export the worker with auth middleware
 export default {
   fetch: withAuth<Env>(
-    async (request, env) => {
+    async (request, env, { userId, sessionId }) => {
       try {
         // Pass userId and sessionId to Remix loader context
         const loadContext = {
           env,
-          userId: env.userId,
-          sessionId: env.sessionId,
+          userId,
+          sessionId,
         };
         return await handleRequest(request, loadContext);
       } catch (error) {
@@ -606,12 +606,37 @@ Log out the current user.
 #### Middleware
 
 ```typescript
-const handler = withAuth(requestHandler, {
-  hooks?: {
-    onNewUser?: (props: { userId: string; env: TEnv; request: Request }) => Promise<void>;
-    onEmailVerified?: (props: { userId: string; email: string; env: TEnv; request: Request }) => Promise<void>;
+const handler = withAuth<TEnv>(
+  // Handler receives userId and sessionId as third argument
+  async (
+    request: Request, 
+    env: TEnv, 
+    { userId, sessionId }: { userId: string; sessionId: string }
+  ) => Promise<Response>,
+  { 
+    hooks: AuthHooks<TEnv>
   }
-});
+);
+```
+
+The middleware:
+1. Handles all `/auth/*` routes automatically
+2. Creates anonymous users for new visitors
+3. Manages session and refresh tokens
+4. Provides `userId` and `sessionId` to your handler
+5. Sets cookies for new/refreshed tokens
+
+Example usage:
+```typescript
+export default {
+  fetch: withAuth<Env>(
+    async (request, env, { userId, sessionId }) => {
+      // Use userId and sessionId in your handler
+      return new Response(`Hello ${userId}!`);
+    },
+    { hooks: authHooks }
+  ),
+};
 ```
 
 ### ⚛️ auth-kit/react

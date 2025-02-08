@@ -1,21 +1,18 @@
 {
   "name": "auth-kit",
   "version": "0.0.1",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
     "./client": {
-      "types": "./dist/client.ts",
-      "import": "./dist/client.ts"
+      "types": "./src/client.ts",
+      "import": "./src/client.ts"
     },
     "./react": {
-      "types": "./dist/react.tsx",
-      "import": "./dist/react.tsx"
+      "types": "./src/react.tsx",
+      "import": "./src/react.tsx"
     },
     "./worker": {
-      "types": "./dist/worker.ts",
-      "import": "./dist/worker.js"
+      "types": "./src/worker.ts",
+      "import": "./src/worker.ts"
     }
   },
   "files": [

@@ -339,11 +339,8 @@ describe('Auth Middleware', () => {
 
     expect(mockHandler).toHaveBeenCalledWith(
       request,
-      expect.objectContaining({
-        ...mockEnv,
-        userId: 'test-uuid',
-        sessionId: 'test-uuid'
-      })
+      mockEnv,
+      { userId: 'test-uuid', sessionId: 'test-uuid' }
     );
 
     const cookies = response.headers.getSetCookie?.() || response.headers.get('Set-Cookie')?.split(', ');
@@ -362,11 +359,8 @@ describe('Auth Middleware', () => {
 
     expect(mockHandler).toHaveBeenCalledWith(
       request,
-      expect.objectContaining({
-        ...mockEnv,
-        userId: 'test-uuid',
-        sessionId: 'test-uuid'
-      })
+      mockEnv,
+      { userId: 'test-uuid', sessionId: 'test-uuid' }
     );
   });
 
@@ -382,11 +376,8 @@ describe('Auth Middleware', () => {
 
     expect(mockHandler).toHaveBeenCalledWith(
       request,
-      expect.objectContaining({
-        ...mockEnv,
-        userId: 'test-uuid',
-        sessionId: expect.any(String)
-      })
+      mockEnv,
+      { userId: 'test-uuid', sessionId: expect.any(String) }
     );
 
     const cookies = response.headers.getSetCookie?.() || response.headers.get('Set-Cookie')?.split(', ');
@@ -405,11 +396,8 @@ describe('Auth Middleware', () => {
 
     expect(mockHandler).toHaveBeenCalledWith(
       request,
-      expect.objectContaining({
-        ...mockEnv,
-        userId: 'test-uuid',
-        sessionId: 'test-uuid'
-      })
+      mockEnv,
+      { userId: 'test-uuid', sessionId: 'test-uuid' }
     );
 
     const cookies = response.headers.getSetCookie?.() || response.headers.get('Set-Cookie')?.split(', ');

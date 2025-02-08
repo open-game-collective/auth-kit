@@ -10,7 +10,10 @@ interface TokenPayload {
   aud?: string;
 }
 
-async function createSessionToken(userId: string, secret: string): Promise<string> {
+async function createSessionToken(
+  userId: string,
+  secret: string
+): Promise<string> {
   const sessionId = crypto.randomUUID();
   return await new SignJWT({ userId, sessionId })
     .setProtectedHeader({ alg: "HS256" })
@@ -19,7 +22,10 @@ async function createSessionToken(userId: string, secret: string): Promise<strin
     .sign(new TextEncoder().encode(secret));
 }
 
-async function createRefreshToken(userId: string, secret: string): Promise<string> {
+async function createRefreshToken(
+  userId: string,
+  secret: string
+): Promise<string> {
   return await new SignJWT({ userId })
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime("7d")
@@ -27,30 +33,28 @@ async function createRefreshToken(userId: string, secret: string): Promise<strin
     .sign(new TextEncoder().encode(secret));
 }
 
-async function verifyToken(token: string, secret: string): Promise<TokenPayload | null> {
+async function verifyToken(
+  token: string,
+  secret: string
+): Promise<TokenPayload | null> {
   try {
     const verified = await jwtVerify(token, new TextEncoder().encode(secret));
-    console.log('JWT verify result:', verified);
     const payload = verified.payload as unknown as TokenPayload;
-    console.log('Parsed payload:', payload);
-    
+
     // For refresh tokens, we only need userId
-    if (payload.aud === 'REFRESH') {
+    if (payload.aud === "REFRESH") {
       if (!payload.userId) {
-        console.log('Missing userId in refresh token');
         return null;
       }
       return payload;
     }
-    
+
     // For session tokens, we need both userId and sessionId
     if (!payload.userId || !payload.sessionId) {
-      console.log('Missing required fields in session token');
       return null;
     }
     return payload;
   } catch (error) {
-    console.log('JWT verify error:', error);
     return null;
   }
 }
@@ -58,10 +62,10 @@ async function verifyToken(token: string, secret: string): Promise<TokenPayload 
 function getCookie(request: Request, name: string): string | undefined {
   const cookieHeader = request.headers.get("Cookie");
   if (!cookieHeader) return undefined;
-  
-  const cookies = cookieHeader.split(';').map(cookie => cookie.trim());
-  const cookie = cookies.find(cookie => cookie.startsWith(`${name}=`));
-  return cookie ? cookie.split('=')[1] : undefined;
+
+  const cookies = cookieHeader.split(";").map((cookie) => cookie.trim());
+  const cookie = cookies.find((cookie) => cookie.startsWith(`${name}=`));
+  return cookie ? cookie.split("=")[1] : undefined;
 }
 
 function generateVerificationCode(): string {
@@ -80,7 +84,7 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
   return async (request: Request, env: TEnv): Promise<Response> => {
     const url = new URL(request.url);
     const path = url.pathname.split("/").filter(Boolean);
-    
+
     if (path.length < 2 || path[0] !== "auth") {
       return new Response("Not Found", { status: 404 });
     }
@@ -96,22 +100,30 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
     try {
       switch (route) {
         case "verify": {
-          const { email, code } = await request.json() as { email: string; code: string };
-          
+          const { email, code } = (await request.json()) as {
+            email: string;
+            code: string;
+          };
+
           // Look up the user ID for this email
           let userId = await hooks.getUserIdByEmail({ email, env, request });
           const isNewUser = !userId;
-          
+
           // Verify the code
-          const isValid = await hooks.verifyVerificationCode({ email, code, env, request });
+          const isValid = await hooks.verifyVerificationCode({
+            email,
+            code,
+            env,
+            request,
+          });
           if (!isValid) {
             return new Response("Invalid or expired code", { status: 400 });
           }
-          
+
           if (isNewUser) {
             // Generate a new user ID for new users
             userId = crypto.randomUUID();
-            
+
             // Call onNewUser hook if provided
             if (hooks.onNewUser) {
               await hooks.onNewUser({ userId, env, request });
@@ -134,74 +146,105 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           }
 
           // Generate new session and refresh tokens for the authenticated user
-          const sessionToken = await createSessionToken(userId, env.AUTH_SECRET);
-          const refreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
-
-          return new Response(JSON.stringify({ 
-            success: true,
+          const sessionToken = await createSessionToken(
             userId,
-            sessionToken,
-            refreshToken
-          }), {
-            headers: { 'Content-Type': 'application/json' }
-          });
+            env.AUTH_SECRET
+          );
+          const refreshToken = await createRefreshToken(
+            userId,
+            env.AUTH_SECRET
+          );
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              userId,
+              sessionToken,
+              refreshToken,
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+            }
+          );
         }
 
         case "request-code": {
-          const { email } = await request.json() as { email: string };
-          
+          const { email } = (await request.json()) as { email: string };
+
           // Generate a new verification code
           const code = generateVerificationCode();
-          
+
           // Store the code
           await hooks.storeVerificationCode({ email, code, env, request });
-          
+
           // Send the code via email
-          const sent = await hooks.sendVerificationCode({ email, code, env, request });
-          if (!sent) {
-            return new Response("Failed to send verification code", { status: 500 });
-          }
-          
-          return new Response(JSON.stringify({ 
-            success: true,
-            message: "Code sent to email",
-            expiresIn: 600 // 10 minutes
-          }), {
-            headers: { 'Content-Type': 'application/json' }
+          const sent = await hooks.sendVerificationCode({
+            email,
+            code,
+            env,
+            request,
           });
+          if (!sent) {
+            return new Response("Failed to send verification code", {
+              status: 500,
+            });
+          }
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              message: "Code sent to email",
+              expiresIn: 600, // 10 minutes
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+            }
+          );
         }
 
         case "refresh": {
-          const authHeader = request.headers.get('Authorization');
-          console.log('Auth header:', authHeader);
-          
-          if (!authHeader?.startsWith('Bearer ')) {
-            console.log('No Bearer token found');
+          const authHeader = request.headers.get("Authorization");
+          console.log("Auth header:", authHeader);
+
+          if (!authHeader?.startsWith("Bearer ")) {
+            console.log("No Bearer token found");
             return new Response("No refresh token provided", { status: 401 });
           }
 
           const refreshToken = authHeader.slice(7); // Remove 'Bearer ' prefix
-          console.log('Refresh token:', refreshToken);
-          
+          console.log("Refresh token:", refreshToken);
+
           const payload = await verifyToken(refreshToken, env.AUTH_SECRET);
-          console.log('Verify token result:', payload);
-          
+          console.log("Verify token result:", payload);
+
           if (!payload) {
-            console.log('Invalid token payload');
+            console.log("Invalid token payload");
             return new Response("Invalid refresh token", { status: 401 });
           }
 
-          const newSessionToken = await createSessionToken(payload.userId, env.AUTH_SECRET);
-          const newRefreshToken = await createRefreshToken(payload.userId, env.AUTH_SECRET);
-          console.log('New tokens generated:', { newSessionToken, newRefreshToken });
-
-          return new Response(JSON.stringify({
-            success: true,
-            sessionToken: newSessionToken,
-            refreshToken: newRefreshToken
-          }), {
-            headers: { 'Content-Type': 'application/json' }
+          const newSessionToken = await createSessionToken(
+            payload.userId,
+            env.AUTH_SECRET
+          );
+          const newRefreshToken = await createRefreshToken(
+            payload.userId,
+            env.AUTH_SECRET
+          );
+          console.log("New tokens generated:", {
+            newSessionToken,
+            newRefreshToken,
           });
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              sessionToken: newSessionToken,
+              refreshToken: newRefreshToken,
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+            }
+          );
         }
 
         case "logout": {
@@ -228,7 +271,11 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
 }
 
 export function withAuth<TEnv extends { AUTH_SECRET: string }>(
-  handler: (request: Request, env: TEnv & { userId: string; sessionId: string }) => Promise<Response>,
+  handler: (
+    request: Request,
+    env: TEnv,
+    { userId, sessionId }: { userId: string; sessionId: string }
+  ) => Promise<Response>,
   config: {
     hooks: AuthHooks<TEnv>;
   }
@@ -269,7 +316,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
           sessionId = userId;
           newSessionToken = await createSessionToken(userId, env.AUTH_SECRET);
           newRefreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
-          
+
           if (hooks.onNewUser) {
             await hooks.onNewUser({ userId, env, request });
           }
@@ -280,7 +327,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
         sessionId = userId;
         newSessionToken = await createSessionToken(userId, env.AUTH_SECRET);
         newRefreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
-        
+
         if (hooks.onNewUser) {
           await hooks.onNewUser({ userId, env, request });
         }
@@ -291,13 +338,13 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
       sessionId = userId;
       newSessionToken = await createSessionToken(userId, env.AUTH_SECRET);
       newRefreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
-      
+
       if (hooks.onNewUser) {
         await hooks.onNewUser({ userId, env, request });
       }
     }
 
-    const response = await handler(request, { ...env, userId, sessionId });
+    const response = await handler(request, env, { userId, sessionId });
 
     if (newSessionToken) {
       response.headers.append(
@@ -315,3 +362,5 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
     return response;
   };
 }
+
+export { AuthHooks } from "./types";
