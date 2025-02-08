@@ -22,11 +22,17 @@ A full-stack authentication toolkit for React applications. Built on Cloudflare 
 ## 💾 Installation
 
 ```bash
-npm install auth-kit jose
+npm install auth-kit
 # or
-yarn add auth-kit jose
+yarn add auth-kit
 # or
-pnpm add auth-kit jose
+pnpm add auth-kit
+```
+
+Optional: If you want to use environment validation with Zod (as shown in the examples):
+
+```bash
+npm install zod
 ```
 
 ## 🌟 Key Features
@@ -43,34 +49,180 @@ pnpm add auth-kit jose
 
 ### 1️⃣ Set up Environment Types
 
-First, set up your environment types to include auth-kit's additions to the Remix context:
+First, set up your environment types:
 
 ```typescript
-// app/types/env.ts
+// app/env.ts
+
+// Define Remix context types
 declare module "@remix-run/cloudflare" {
   interface AppLoadContext {
     env: Env;
-    // Added by auth-kit middleware
     userId: string;
     sessionId: string;
+    pageSessionId: string;
   }
 }
 
+// Environment type with required auth-kit variables
 export interface Env {
   // Required for auth-kit
   AUTH_SECRET: string;
-
-  // Storage for users and verification codes
-  USERS_KV: KVNamespace;
-  CODES_KV: KVNamespace;
-
-  // Email service (optional)
-  SENDGRID_API_KEY?: string;
-  RESEND_API_KEY?: string;
-
+  SENDGRID_API_KEY: string;
+  
+  // KV Storage for auth data
+  KV_STORAGE: KVNamespace;
+  
+  // Your Durable Objects
+  REMIX: DurableObjectNamespace;
+  
   // Your other environment variables
   [key: string]: unknown;
 }
+```
+
+Then create your worker entry point:
+
+```typescript
+// app/worker.ts
+import { createRequestHandler, logDevReady } from "@remix-run/cloudflare";
+import * as build from "@remix-run/dev/server-build";
+import { AuthHooks, withAuth } from "auth-kit/worker";
+import type { Env } from "./env";
+
+if (process.env.NODE_ENV === "development") {
+  logDevReady(build);
+}
+
+const handleRemixRequest = createRequestHandler(build);
+
+const authHooks: AuthHooks<Env> = {
+  getUserIdByEmail: async ({ email, env }) => {
+    return await env.KV_STORAGE.get(`email:${email}`);
+  },
+
+  storeVerificationCode: async ({ email, code, env }) => {
+    await env.KV_STORAGE.put(`code:${email}`, code, {
+      expirationTtl: 600,
+    });
+  },
+
+  verifyVerificationCode: async ({ email, code, env }) => {
+    const storedCode = await env.KV_STORAGE.get(`code:${email}`);
+    return storedCode === code;
+  },
+
+  sendVerificationCode: async ({ email, code, env }) => {
+    try {
+      const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.SENDGRID_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email }] }],
+          from: { email: "auth@yourdomain.com" },
+          subject: "Your verification code",
+          content: [{ type: "text/plain", value: `Your code is: ${code}` }],
+        }),
+      });
+      return response.ok;
+    } catch (error) {
+      console.error("Failed to send email:", error);
+      return false;
+    }
+  },
+
+  onNewUser: async ({ userId, env }) => {
+    await env.KV_STORAGE.put(
+      `user:${userId}`,
+      JSON.stringify({
+        created: new Date().toISOString(),
+      })
+    );
+  },
+
+  onAuthenticate: async ({ userId, email, env }) => {
+    await env.KV_STORAGE.put(
+      `user:${userId}:lastLogin`,
+      new Date().toISOString()
+    );
+  },
+
+  onEmailVerified: async ({ userId, email, env }) => {
+    await env.KV_STORAGE.put(`user:${userId}:verified`, "true");
+    await env.KV_STORAGE.put(`email:${email}`, userId);
+  },
+};
+
+const handler = withAuth<Env>(
+  async (request, env, { userId, sessionId }) => {
+    try {
+      return await handleRemixRequest(request, {
+        env,
+        userId,
+        sessionId,
+        pageSessionId: crypto.randomUUID(),
+      });
+    } catch (error) {
+      console.error("Error processing request:", error);
+      return new Response("Internal Error", { status: 500 });
+    }
+  },
+  { hooks: authHooks }
+);
+
+// Durable Object implementation
+export class RemixDO extends DurableObject<Env> {
+  constructor(state: DurableObjectState, env: Env) {
+    super(state, env);
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    return handler(request, this.env);
+  }
+}
+
+// Worker entry point
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    // Route all requests through the Durable Object
+    const id = env.REMIX.idFromName("default");
+    const remixDO = env.REMIX.get(id);
+    return remixDO.fetch(request);
+  },
+} satisfies ExportedHandler<Env>;
+```
+
+Configure your worker in `wrangler.toml`:
+
+```toml
+name = "my-remix-app"
+main = "app/worker.ts"
+compatibility_date = "2024-01-01"
+
+[durable_objects]
+bindings = [
+  { name = "REMIX", class_name = "RemixDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RemixDO"]
+
+[vars]
+NODE_ENV = "development"
+WEB_HOST = "http://localhost:8787"
+
+# KV Namespace for auth storage
+kv_namespaces = [
+  { binding = "KV_STORAGE", id = "..." }
+]
+
+# Secrets (use wrangler secret put for production)
+# - AUTH_SECRET
+# - SENDGRID_API_KEY
 ```
 
 ### 2️⃣ Set up Worker Entry Point
@@ -104,8 +256,8 @@ const authHooks: AuthHooks<Env> = {
     return storedCode === code;
   },
 
-  // Required: Send verification code via email
-  sendVerificationCode: async ({ email, code, env }) => {
+  // Required: Send a verification code via email
+  sendVerificationCode: async ({ email, code, env, request }) => {
     try {
       const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
         method: "POST",
@@ -797,6 +949,36 @@ The React integration provides:
 
 ## 🔑 TypeScript Types
 
+### Environment Types
+
+```typescript
+// Environment type with required auth-kit variables
+export interface Env {
+  // Required for auth-kit
+  AUTH_SECRET: string;
+  SENDGRID_API_KEY: string;
+  
+  // KV Storage for auth data
+  KV_STORAGE: KVNamespace;
+  
+  // Your Durable Objects
+  REMIX: DurableObjectNamespace;
+  
+  // Your other environment variables
+  [key: string]: unknown;
+}
+
+// Remix context types
+declare module "@remix-run/cloudflare" {
+  interface AppLoadContext {
+    env: Env;
+    userId: string;
+    sessionId: string;
+    pageSessionId: string;
+  }
+}
+```
+
 ### Auth State
 
 ```typescript
@@ -820,15 +1002,6 @@ type AuthState = {
       error?: string;
     }
 );
-```
-
-### Environment Types
-
-```typescript
-interface Env {
-  AUTH_SECRET: string;
-  USER: DurableObjectNamespace;
-}
 ```
 
 ## Hooks
@@ -858,12 +1031,20 @@ const authHooks = {
   // Required: Send a verification code via email
   sendVerificationCode: async ({ email, code, env, request }) => {
     try {
-      await sendEmail({
-        to: email,
-        subject: "Your verification code",
-        text: `Your code is: ${code}`,
+      const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.SENDGRID_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email }] }],
+          from: { email: "auth@yourdomain.com" },
+          subject: "Your verification code",
+          content: [{ type: "text/plain", value: `Your code is: ${code}` }],
+        }),
       });
-      return true;
+      return response.ok;
     } catch (error) {
       console.error("Failed to send email:", error);
       return false;
