@@ -60,12 +60,34 @@ async function verifyToken(
 }
 
 function getCookie(request: Request, name: string): string | undefined {
-  const cookieHeader = request.headers.get("Cookie");
-  if (!cookieHeader) return undefined;
-
-  const cookies = cookieHeader.split(";").map((cookie) => cookie.trim());
-  const cookie = cookies.find((cookie) => cookie.startsWith(`${name}=`));
-  return cookie ? cookie.split("=")[1] : undefined;
+  console.log('Debug - getCookie called with name:', name);
+  
+  // Try both lowercase and uppercase cookie header
+  const cookieHeader = request.headers.get("cookie");
+  console.log('Debug - Cookie header (lowercase):', cookieHeader);
+  
+  if (!cookieHeader) {
+    console.log('Debug - No cookie header found');
+    return undefined;
+  }
+  
+  // Split and trim cookies
+  const cookies = cookieHeader.split(";").map(cookie => cookie.trim());
+  console.log('Debug - Parsed cookies:', cookies);
+  
+  // Find the specific cookie
+  const cookie = cookies.find(cookie => cookie.startsWith(`${name}=`));
+  console.log('Debug - Found cookie:', cookie);
+  
+  if (!cookie) {
+    console.log('Debug - Cookie not found');
+    return undefined;
+  }
+  
+  // Extract and decode the value
+  const value = decodeURIComponent(cookie.split("=")[1]);
+  console.log('Debug - Cookie value:', value);
+  return value;
 }
 
 function generateVerificationCode(): string {
@@ -86,7 +108,10 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
     const path = url.pathname.split("/").filter(Boolean);
 
     if (path.length < 2 || path[0] !== "auth") {
-      return new Response("Not Found", { status: 404 });
+      return new Response(JSON.stringify({ error: "Not Found" }), { 
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
     }
 
     // Remove 'auth' from path
@@ -94,7 +119,10 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
     const route = path.join("/");
 
     if (request.method !== "POST") {
-      return new Response("Method not allowed", { status: 405 });
+      return new Response(JSON.stringify({ error: "Method not allowed" }), { 
+        status: 405,
+        headers: { "Content-Type": "application/json" }
+      });
     }
 
     try {
@@ -265,7 +293,10 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
       }
     } catch (error) {
       console.error("Auth router error:", error);
-      return new Response("Internal server error", { status: 500 });
+      return new Response(JSON.stringify({ error: "Internal server error" }), { 
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      });
     }
   };
 }
@@ -274,7 +305,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
   handler: (
     request: Request,
     env: TEnv,
-    { userId, sessionId }: { userId: string; sessionId: string }
+    { userId, sessionId, sessionToken }: { userId: string; sessionId: string; sessionToken: string }
   ) => Promise<Response>,
   config: {
     hooks: AuthHooks<TEnv>;
@@ -290,32 +321,46 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
       return router(request, env);
     }
 
+    console.log('Debug - Headers:', [...request.headers.entries()]);
     const sessionToken = getCookie(request, SESSION_TOKEN_COOKIE);
+    console.log('Debug - Session token from cookie:', sessionToken);
     const refreshToken = getCookie(request, REFRESH_TOKEN_COOKIE);
+    console.log('Debug - Refresh token from cookie:', refreshToken);
 
     let userId: string;
     let sessionId: string;
     let newSessionToken: string | undefined;
     let newRefreshToken: string | undefined;
+    let currentSessionToken: string;
 
+    // First try to verify the session token
     if (sessionToken) {
+      console.log('Debug - Verifying session token');
       const payload = await verifyToken(sessionToken, env.AUTH_SECRET);
-      if (payload) {
+      console.log('Debug - Session token verification result:', payload);
+      if (payload && payload.aud === 'SESSION') {
+        // Valid session token
         userId = payload.userId;
         sessionId = payload.sessionId || crypto.randomUUID();
+        currentSessionToken = sessionToken;
+        console.log('Debug - Using existing session:', { userId, sessionId });
       } else if (refreshToken) {
+        // Invalid session token but has refresh token
         const refreshPayload = await verifyToken(refreshToken, env.AUTH_SECRET);
-        if (refreshPayload) {
+        if (refreshPayload && refreshPayload.aud === 'REFRESH') {
+          // Valid refresh token, create new session
           userId = refreshPayload.userId;
           sessionId = crypto.randomUUID();
           newSessionToken = await createSessionToken(userId, env.AUTH_SECRET);
           newRefreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
+          currentSessionToken = newSessionToken;
         } else {
-          // Both tokens invalid, create new anonymous user
+          // Invalid refresh token, create new anonymous user
           userId = crypto.randomUUID();
           sessionId = userId;
           newSessionToken = await createSessionToken(userId, env.AUTH_SECRET);
           newRefreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
+          currentSessionToken = newSessionToken;
 
           if (hooks.onNewUser) {
             await hooks.onNewUser({ userId, env, request });
@@ -327,6 +372,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
         sessionId = userId;
         newSessionToken = await createSessionToken(userId, env.AUTH_SECRET);
         newRefreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
+        currentSessionToken = newSessionToken;
 
         if (hooks.onNewUser) {
           await hooks.onNewUser({ userId, env, request });
@@ -338,13 +384,14 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
       sessionId = userId;
       newSessionToken = await createSessionToken(userId, env.AUTH_SECRET);
       newRefreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
+      currentSessionToken = newSessionToken;
 
       if (hooks.onNewUser) {
         await hooks.onNewUser({ userId, env, request });
       }
     }
 
-    const response = await handler(request, env, { userId, sessionId });
+    const response = await handler(request, env, { userId, sessionId, sessionToken: currentSessionToken });
 
     if (newSessionToken) {
       response.headers.append(

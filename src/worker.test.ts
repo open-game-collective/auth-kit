@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import { createAuthRouter, withAuth } from './worker';
 import { http, HttpResponse } from 'msw';
 import { server } from './test/setup';
@@ -28,7 +28,7 @@ vi.mock('jose', () => {
     jwtVerify: vi.fn().mockImplementation(async (_token, _secret) => {
       if (_token === 'valid-session-token') {
         return {
-          payload: { userId: 'test-user', sessionId: 'test-session' }
+          payload: { userId: 'test-user', sessionId: 'test-session', aud: 'SESSION' }
         };
       }
       if (_token === 'valid-refresh-token') {
@@ -311,6 +311,19 @@ describe('Auth Router', () => {
 });
 
 describe('Auth Middleware', () => {
+  const originalHeadersGet = Headers.prototype.get;
+  beforeAll(() => {
+    Headers.prototype.get = function(key: string) {
+      if (key.toLowerCase() === 'cookie' && (global as any).__testCookieValue__) {
+        return (global as any).__testCookieValue__;
+      }
+      return originalHeadersGet.call(this, key);
+    };
+  });
+  afterAll(() => {
+    Headers.prototype.get = originalHeadersGet;
+  });
+  
   const mockHandler = vi.fn().mockResolvedValue(new Response('OK'));
   const middleware = withAuth(mockHandler, {
     hooks: {
@@ -318,7 +331,6 @@ describe('Auth Middleware', () => {
       onEmailVerified: vi.fn(),
       onAuthenticate: vi.fn(),
       getUserIdByEmail: vi.fn().mockImplementation(async ({ email }) => {
-        // For tests, return a fixed user ID for test@example.com
         return email === 'test@example.com' ? 'test-user' : null;
       }),
       storeVerificationCode: vi.fn(),
@@ -330,17 +342,19 @@ describe('Auth Middleware', () => {
   });
 
   beforeEach(() => {
+    (global as any).__testCookieValue__ = undefined;
     mockHandler.mockClear();
   });
 
   it('should create anonymous user for new requests', async () => {
+    // No cookies set
     const request = new Request('http://localhost/');
     const response = await middleware(request, mockEnv);
 
     expect(mockHandler).toHaveBeenCalledWith(
       request,
       mockEnv,
-      { userId: 'test-uuid', sessionId: 'test-uuid' }
+      { userId: 'test-uuid', sessionId: 'test-uuid', sessionToken: 'new-session-token' }
     );
 
     const cookies = response.headers.getSetCookie?.() || response.headers.get('Set-Cookie')?.split(', ');
@@ -349,35 +363,28 @@ describe('Auth Middleware', () => {
   });
 
   it('should use existing session if valid', async () => {
-    const request = new Request('http://localhost/', {
-      headers: new Headers({
-        Cookie: 'auth_session_token=valid-session-token'
-      })
-    });
+    (global as any).__testCookieValue__ = 'auth_session_token=valid-session-token';
+    const request = new Request('http://localhost/');
 
     await middleware(request, mockEnv);
 
     expect(mockHandler).toHaveBeenCalledWith(
       request,
       mockEnv,
-      { userId: 'test-uuid', sessionId: 'test-uuid' }
+      { userId: 'test-user', sessionId: 'test-session', sessionToken: 'valid-session-token' }
     );
   });
 
   it('should refresh session if expired but has valid refresh token', async () => {
-    const headers = new Headers();
-    headers.append('Cookie', 'auth_session_token=invalid-token; auth_refresh_token=valid-refresh-token');
-    
-    const request = new Request('http://localhost/', {
-      headers
-    });
+    (global as any).__testCookieValue__ = 'auth_session_token=invalid-token; auth_refresh_token=valid-refresh-token';
+    const request = new Request('http://localhost/');
 
     const response = await middleware(request, mockEnv);
 
     expect(mockHandler).toHaveBeenCalledWith(
       request,
       mockEnv,
-      { userId: 'test-uuid', sessionId: expect.any(String) }
+      { userId: 'test-user', sessionId: expect.any(String), sessionToken: 'new-session-token' }
     );
 
     const cookies = response.headers.getSetCookie?.() || response.headers.get('Set-Cookie')?.split(', ');
@@ -386,18 +393,15 @@ describe('Auth Middleware', () => {
   });
 
   it('should create new anonymous user if all tokens are invalid', async () => {
-    const request = new Request('http://localhost/', {
-      headers: {
-        Cookie: 'auth_session_token=invalid-token; auth_refresh_token=invalid-token'
-      }
-    });
+    (global as any).__testCookieValue__ = 'auth_session_token=invalid-token; auth_refresh_token=invalid-token';
+    const request = new Request('http://localhost/');
 
     const response = await middleware(request, mockEnv);
 
     expect(mockHandler).toHaveBeenCalledWith(
       request,
       mockEnv,
-      { userId: 'test-uuid', sessionId: 'test-uuid' }
+      { userId: 'test-uuid', sessionId: 'test-uuid', sessionToken: 'new-session-token' }
     );
 
     const cookies = response.headers.getSetCookie?.() || response.headers.get('Set-Cookie')?.split(', ');

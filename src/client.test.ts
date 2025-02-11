@@ -207,4 +207,63 @@ describe('AuthClient', () => {
       host: 'localhost:8787'
     });
   });
+
+  it('should maintain sessionToken in state after initialization', () => {
+    const client = createAuthClient({
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'initial-session-token'
+    });
+
+    expect(client.getState().sessionToken).toBe('initial-session-token');
+  });
+
+  it('should update sessionToken after successful verification', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/verify', () => {
+        return HttpResponse.json({
+          success: true,
+          userId: 'test-user',
+          sessionToken: 'new-session-token',
+          refreshToken: 'test-refresh'
+        });
+      })
+    );
+
+    const client = createAuthClient({
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'initial-session-token'
+    });
+
+    await client.verifyEmail('test@example.com', '123456');
+
+    expect(client.getState().sessionToken).toBe('new-session-token');
+  });
+
+  it('should update sessionToken after successful refresh', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/refresh', () => {
+        return HttpResponse.json({
+          success: true,
+          userId: 'test-user',
+          sessionToken: 'refreshed-session-token',
+          refreshToken: 'new-refresh'
+        });
+      })
+    );
+
+    const client = createAuthClient({
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'initial-session-token'
+    });
+
+    // Set refresh token in state
+    client.getState().refreshToken = 'test-refresh';
+
+    await client.refresh();
+
+    expect(client.getState().sessionToken).toBe('refreshed-session-token');
+  });
 }); 

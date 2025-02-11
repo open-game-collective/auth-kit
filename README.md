@@ -54,10 +54,11 @@ declare module "@remix-run/cloudflare" {
   interface AppLoadContext {
     env: Env;
 
-    // The 3 context parameters we inject in the withAuth middleware
+    // Auth context from worker middleware
     userId: string;
     sessionId: string;
-    pageSessionId: string;
+    sessionToken: string;
+    requestId: string;
   }
 }
 
@@ -153,14 +154,15 @@ const authHooks: AuthHooks<Env> = {
 };
 
 const handler = withAuth<Env>(
-  async (request, env, { userId, sessionId }) => {
+  async (request, env, { userId, sessionId, sessionToken }) => {
     try {
-      // Inject the userId, sessionId, and pageSessionId into the request context
+      // Inject the userId, sessionId, sessionToken, and requestId into the request context
       return await handleRemixRequest(request, {
         env,
         userId,
         sessionId,
-        pageSessionId: crypto.randomUUID(),
+        sessionToken,
+        requestId: crypto.randomUUID(),
       });
     } catch (error) {
       console.error("Error processing request:", error);
@@ -211,7 +213,7 @@ kv_namespaces = [
 
 ### 2️⃣ Access Auth in Remix Routes
 
-Now you can access the authenticated user in your Remix routes:
+Now you can access the authenticated user and session token in your Remix routes:
 
 ```typescript
 // app/routes/_index.tsx
@@ -220,8 +222,8 @@ import { json } from "@remix-run/cloudflare";
 import { useLoaderData } from "@remix-run/react";
 
 export async function loader({ context }: LoaderFunctionArgs) {
-  // Access userId and sessionId from context
-  const { userId, sessionId } = context;
+  // Access userId, sessionId, and sessionToken from context
+  const { userId, sessionId, sessionToken } = context;
 
   // Example: Fetch user data from KV
   const userData = await context.env.USERS_KV.get(`user:${userId}`);
@@ -229,12 +231,20 @@ export async function loader({ context }: LoaderFunctionArgs) {
   return json({
     userId,
     sessionId,
+    sessionToken, // Added: Pass session token to client
     userData: userData ? JSON.parse(userData) : null,
   });
 }
 
 export default function Index() {
-  const { userId, userData } = useLoaderData<typeof loader>();
+  const { userId, sessionToken, userData } = useLoaderData<typeof loader>();
+
+  // Create auth client with required tokens
+  const client = useMemo(() => createAuthClient({
+    host: "localhost:8787",
+    userId,
+    sessionToken,
+  }), [userId, sessionToken]);
 
   return (
     <div>
@@ -850,34 +860,86 @@ declare module "@remix-run/cloudflare" {
     env: Env;
     userId: string;
     sessionId: string;
-    pageSessionId: string;
+    requestId: string;
   }
 }
 ```
 
 ### Auth State
 
+The auth client maintains a state object with the following structure:
+
 ```typescript
 type AuthState = {
-  isInitializing: boolean;
+  /** Whether an auth operation is in progress */
   isLoading: boolean;
-  baseUrl: string;
-} & (
-  | {
-      userId: string;
-      sessionToken: string;
-      refreshToken: string | null;
-      isVerified: boolean;
-      error?: undefined;
-    }
-  | {
-      userId: null;
-      sessionToken: null;
-      refreshToken: null;
-      isVerified: false;
-      error?: string;
-    }
-);
+  /** Host without protocol (e.g. "localhost:8787") */
+  host: string;
+  /** Current user ID from worker middleware */
+  userId: string;
+  /** Current session token from worker middleware */
+  sessionToken: string;
+  /** Optional refresh token for extending the session */
+  refreshToken: string | null;
+  /** Whether the user has verified their email */
+  isVerified: boolean;
+  /** Optional error message from last operation */
+  error?: string;
+};
+```
+
+The state is initialized with required values from the worker middleware:
+
+```typescript
+const client = createAuthClient({
+  host: "localhost:8787",
+  userId: "user_id_from_worker",    // Required
+  sessionToken: "session_token",     // Required
+});
+
+// Initial state will be:
+{
+  isLoading: false,
+  host: "localhost:8787",
+  userId: "user_id_from_worker",
+  sessionToken: "session_token",
+  refreshToken: null,
+  isVerified: false
+}
+```
+
+You can subscribe to state changes:
+
+```typescript
+const unsubscribe = client.subscribe((state) => {
+  console.log("Auth state updated:", {
+    userId: state.userId,
+    isVerified: state.isVerified,
+    isLoading: state.isLoading
+  });
+});
+
+// Later: cleanup subscription
+unsubscribe();
+```
+
+With React hooks:
+
+```typescript
+function AuthStatus() {
+  const userId = AuthContext.useSelector(state => state.userId);
+  const isVerified = AuthContext.useSelector(state => state.isVerified);
+  const isLoading = AuthContext.useSelector(state => state.isLoading);
+  
+  if (isLoading) return <LoadingSpinner />;
+  
+  return (
+    <div>
+      <p>User ID: {userId}</p>
+      <p>Status: {isVerified ? '✅ Verified' : '⏳ Unverified'}</p>
+    </div>
+  );
+}
 ```
 
 ## Hooks
