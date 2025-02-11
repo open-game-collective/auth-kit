@@ -7,8 +7,8 @@ export type AuthTokens = {
 export type AuthState = {
   isLoading: boolean;
   host: string;
-  userId: string | null;
-  sessionToken: string | null;
+  userId: string;
+  sessionToken: string;
   refreshToken: string | null;
   isVerified: boolean;
   error?: string;
@@ -135,7 +135,6 @@ export type AuthHooks<TEnv = any> = {
 export interface AuthClient {
   getState(): AuthState;
   subscribe(callback: (state: AuthState) => void): () => void;
-  createAnonymousUser(): Promise<{ userId: string; sessionToken: string }>;
   requestCode(email: string): Promise<void>;
   verifyEmail(email: string, code: string): Promise<{ success: boolean }>;
   logout(): Promise<void>;
@@ -143,7 +142,14 @@ export interface AuthClient {
 }
 
 export interface AuthClientConfig {
+  /** Host without protocol (e.g. "localhost:8787") */
   host: string;
+  /** Initial user ID from worker middleware */
+  userId: string;
+  /** Initial session token from worker middleware */
+  sessionToken: string;
+  /** Optional callback when state changes */
   onStateChange?: (state: AuthState) => void;
+  /** Optional callback for handling errors */
   onError?: (error: Error) => void;
 }

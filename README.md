@@ -253,8 +253,12 @@ First, create your auth client:
 // app/auth.client.ts
 import { createAuthClient } from "@open-game-collective/auth-kit/client";
 
+// The userId and sessionToken are provided by the worker middleware
+// via cookies and should be read server-side and passed to the client
 export const authClient = createAuthClient({
   host: "localhost:8787",
+  userId: "user_id_from_cookie", // Required: from worker middleware
+  sessionToken: "session_token_from_cookie", // Required: from worker middleware
 });
 ```
 
@@ -274,9 +278,34 @@ Set up the provider in your root component:
 import { AuthContext } from "./auth.context";
 import { authClient } from "./auth.client";
 
+// Example of getting the initial auth state from the server
+export async function loader({ request }: LoaderFunctionArgs) {
+  const cookieHeader = request.headers.get("Cookie");
+  const userId = getCookie(cookieHeader, "auth_user_id");
+  const sessionToken = getCookie(cookieHeader, "auth_session_token");
+
+  if (!userId || !sessionToken) {
+    throw new Error("Missing required auth tokens");
+  }
+
+  return json({
+    userId,
+    sessionToken,
+  });
+}
+
 export default function App() {
+  const { userId, sessionToken } = useLoaderData<typeof loader>();
+
+  // Create the client with the required tokens
+  const client = useMemo(() => createAuthClient({
+    host: "localhost:8787",
+    userId,
+    sessionToken,
+  }), [userId, sessionToken]);
+
   return (
-    <AuthContext.Provider client={authClient}>
+    <AuthContext.Provider client={client}>
       <html>
         <head>
           <Meta />
@@ -512,6 +541,8 @@ Creates an auth client instance for managing auth state and operations.
 ```typescript
 interface AuthClientConfig {
   host: string;
+  userId: string; // Required: Initial user ID from worker middleware
+  sessionToken: string; // Required: Initial session token from worker middleware
   initialState?: Partial<AuthState>;
   onStateChange?: (state: AuthState) => void;
   onError?: (error: Error) => void;
@@ -520,27 +551,12 @@ interface AuthClientConfig {
 const client = createAuthClient(config);
 ```
 
-The client provides:
-
-```typescript
-interface AuthClient {
-  // State Management
-  getState(): AuthState;
-  subscribe(callback: (state: AuthState) => void): () => void;
-
-  // Auth Operations
-  createAnonymousUser(): Promise<void>;
-  requestCode(email: string): Promise<void>;
-  verifyEmail(email: string, code: string): Promise<{ success: boolean }>;
-  logout(): Promise<void>;
-  refresh(): Promise<void>;
-}
-```
-
 Example usage:
 ```typescript
 const client = createAuthClient({
   host: "localhost:8787",
+  userId: "user_id_from_cookie",
+  sessionToken: "session_token_from_cookie",
   onStateChange: (state) => {
     console.log("Auth state changed:", state);
   },

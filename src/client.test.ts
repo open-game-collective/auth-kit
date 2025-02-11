@@ -1,7 +1,14 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createAuthClient } from './client';
 import { http, HttpResponse } from 'msw';
 import { server } from './test/setup';
+
+// Declare window.location as mutable for tests
+declare global {
+  interface Window {
+    location: Location;
+  }
+}
 
 describe('AuthClient', () => {
   beforeEach(() => {
@@ -11,48 +18,18 @@ describe('AuthClient', () => {
 
   it('should initialize with correct state', () => {
     const client = createAuthClient({
-      host: 'localhost:8787'
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
     });
 
     const state = client.getState();
     expect(state).toEqual({
       isLoading: false,
       error: undefined,
-      userId: null,
-      sessionToken: null,
+      userId: 'test-user',
+      sessionToken: 'test-session',
       refreshToken: null,
-      isVerified: false,
-      host: 'localhost:8787'
-    });
-  });
-
-  it('should create anonymous user', async () => {
-    server.use(
-      http.post('http://localhost:8787/auth/user', () => {
-        return HttpResponse.json({
-          userId: 'anon-user',
-          sessionToken: 'anon-session',
-          refreshToken: 'anon-refresh',
-        });
-      })
-    );
-
-    const client = createAuthClient({
-      host: 'localhost:8787'
-    });
-
-    const states: any[] = [];
-    client.subscribe((state) => states.push(state));
-
-    await client.createAnonymousUser();
-
-    expect(states).toHaveLength(1);
-    expect(states[states.length - 1]).toEqual({
-      isLoading: false,
-      error: undefined,
-      userId: 'anon-user',
-      sessionToken: 'anon-session',
-      refreshToken: 'anon-refresh',
       isVerified: false,
       host: 'localhost:8787'
     });
@@ -62,15 +39,17 @@ describe('AuthClient', () => {
     server.use(
       http.post('http://localhost:8787/auth/request-code', () => {
         return HttpResponse.json({
-          userId: 'test-user',
-          sessionToken: 'test-session',
+          userId: 'test-user-2',
+          sessionToken: 'test-session-2',
           refreshToken: 'test-refresh',
         });
       })
     );
 
     const client = createAuthClient({
-      host: 'localhost:8787'
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
     });
 
     const states: any[] = [];
@@ -82,8 +61,8 @@ describe('AuthClient', () => {
     expect(states[states.length - 1]).toEqual({
       isLoading: false,
       error: undefined,
-      userId: 'test-user',
-      sessionToken: 'test-session',
+      userId: 'test-user-2',
+      sessionToken: 'test-session-2',
       refreshToken: 'test-refresh',
       isVerified: false,
       host: 'localhost:8787'
@@ -94,23 +73,25 @@ describe('AuthClient', () => {
     server.use(
       http.post('http://localhost:8787/auth/request-code', () => {
         return HttpResponse.json({
-          userId: 'test-user',
-          sessionToken: 'test-session',
+          userId: 'test-user-2',
+          sessionToken: 'test-session-2',
           refreshToken: 'test-refresh',
         });
       }),
       http.post('http://localhost:8787/auth/verify', () => {
         return HttpResponse.json({
           success: true,
-          userId: 'test-user',
-          sessionToken: 'test-session',
+          userId: 'test-user-2',
+          sessionToken: 'test-session-2',
           refreshToken: 'test-refresh',
         });
       })
     );
 
     const client = createAuthClient({
-      host: 'localhost:8787'
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
     });
 
     // First request the code to get a userId
@@ -123,63 +104,48 @@ describe('AuthClient', () => {
     expect(client.getState()).toEqual({
       isLoading: false,
       error: undefined,
-      userId: 'test-user',
-      sessionToken: 'test-session',
+      userId: 'test-user-2',
+      sessionToken: 'test-session-2',
       refreshToken: 'test-refresh',
       isVerified: true,
       host: 'localhost:8787'
     });
   });
 
-  it('should handle logout by creating new anonymous user', async () => {
+  it('should handle logout by reloading page', async () => {
     server.use(
-      http.post('http://localhost:8787/auth/request-code', () => {
-        return HttpResponse.json({
-          userId: 'test-user',
-          sessionToken: 'test-session',
-          refreshToken: 'test-refresh',
-        });
-      }),
       http.post('http://localhost:8787/auth/logout', () => {
-        return HttpResponse.json({});
-      }),
-      http.post('http://localhost:8787/auth/user', () => {
-        return HttpResponse.json({
-          userId: 'anon-user',
-          sessionToken: 'anon-session',
-          refreshToken: 'anon-refresh',
-        });
+        return HttpResponse.json({ success: true });
       })
     );
 
     const client = createAuthClient({
-      host: 'localhost:8787'
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
     });
 
-    // First set up an authenticated state via requestCode
-    await client.requestCode('test@example.com');
+    // Mock window.location.reload
+    const reloadMock = vi.fn();
+    const originalReload = window.location.reload;
+    Object.defineProperty(window.location, 'reload', {
+      value: reloadMock,
+      configurable: true
+    });
+
     await client.logout();
 
-    expect(client.getState()).toEqual({
-      isLoading: false,
-      error: undefined,
-      refreshToken: "anon-refresh",
-      sessionToken: "anon-session",
-      userId: "anon-user",
-      host: "localhost:8787",
-      isVerified: false
+    expect(reloadMock).toHaveBeenCalledTimes(1);
+
+    // Restore original reload
+    Object.defineProperty(window.location, 'reload', {
+      value: originalReload,
+      configurable: true
     });
   });
 
   it('should handle refresh token flow', async () => {
     server.use(
-      http.post('http://localhost:8787/auth/request-code', () => {
-        return HttpResponse.json({
-          userId: 'test-user',
-          sessionToken: 'test-session',
-          refreshToken: 'test-refresh',
-        });
-      }),
       http.post('http://localhost:8787/auth/refresh', () => {
         return HttpResponse.json({
           userId: 'test-user',
@@ -190,11 +156,14 @@ describe('AuthClient', () => {
     );
 
     const client = createAuthClient({
-      host: 'localhost:8787'
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
     });
 
-    // First set up an authenticated state via requestCode
-    await client.requestCode('test@example.com');
+    // Set refresh token in state
+    client.getState().refreshToken = 'test-refresh';
+
     await client.refresh();
 
     expect(client.getState()).toEqual({
@@ -221,7 +190,9 @@ describe('AuthClient', () => {
     );
 
     const client = createAuthClient({
-      host: 'localhost:8787'
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
     });
 
     await expect(client.requestCode('invalid')).rejects.toThrow();
@@ -229,8 +200,8 @@ describe('AuthClient', () => {
     expect(client.getState()).toEqual({
       isLoading: false,
       error: 'Invalid email',
-      userId: null,
-      sessionToken: null,
+      userId: 'test-user',
+      sessionToken: 'test-session',
       refreshToken: null,
       isVerified: false,
       host: 'localhost:8787'

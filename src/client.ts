@@ -4,8 +4,8 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
   let state: AuthState = {
     isLoading: false,
     host: config.host,
-    userId: null,
-    sessionToken: null,
+    userId: config.userId,
+    sessionToken: config.sessionToken,
     refreshToken: null,
     isVerified: false,
   };
@@ -26,10 +26,6 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
   function setError(error: string) {
     setState({
       isLoading: false,
-      userId: null,
-      sessionToken: null,
-      refreshToken: null,
-      isVerified: false,
       error
     });
   }
@@ -80,17 +76,6 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     }
   }
 
-  async function createAnonymousUser() {
-    const response = await post<AuthTokens>('user', {});
-    setAuthenticated({
-      userId: response.userId,
-      sessionToken: response.sessionToken,
-      refreshToken: response.refreshToken,
-      isVerified: false
-    });
-    return { userId: response.userId, sessionToken: response.sessionToken };
-  }
-
   return {
     getState() {
       return state;
@@ -101,9 +86,6 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         const index = subscribers.indexOf(callback);
         if (index > -1) subscribers.splice(index, 1);
       };
-    },
-    async createAnonymousUser() {
-      return await createAnonymousUser();
     },
     async requestCode(email: string) {
       setLoading(true);
@@ -157,7 +139,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       setLoading(true);
       try {
         await post('logout', { userId: state.userId });
-        await this.createAnonymousUser(); // Create new anonymous user after logout
+        window.location.reload(); // Force reload to get new anonymous user from worker
       } catch (error) {
         setError(error instanceof Error ? error.message : 'Failed to logout');
         throw error;
@@ -187,11 +169,6 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       }
     }
   };
-}
-
-// Additionally, export a standalone helper for creating an anonymous user
-export async function createAnonymousUser(client: ReturnType<typeof createAuthClient>) {
-  return await client.createAnonymousUser();
 }
 
 // Re-export AuthClient and AuthClientConfig types from './types'
