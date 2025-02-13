@@ -1,6 +1,9 @@
 {
-  "name": "auth-kit",
-  "version": "0.0.1",
+  "name": "@open-game-collective/auth-kit",
+  "version": "0.0.2",
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     "./client": {
       "types": "./src/client.ts",
@@ -16,7 +19,7 @@
     }
   },
   "files": [
-    "dist"
+    "src"
   ],
   "scripts": {
     "build": "tsc",

@@ -1,59 +1,31 @@
-import type { AuthState, AuthTokens } from "./types";
-
-export interface AuthClient {
-  getState(): AuthState;
-  subscribe(callback: (state: AuthState) => void): () => void;
-  createAnonymousUser(): Promise<void>;
-  requestCode(email: string): Promise<void>;
-  verifyEmail(email: string, code: string): Promise<{ success: boolean }>;
-  logout(): Promise<void>;
-  refresh(): Promise<void>;
-}
-
-export interface AuthClientConfig {
-  baseUrl: string;
-  initialState?: Partial<AuthState>;
-  onStateChange?: (state: AuthState) => void;
-  onError?: (error: Error) => void;
-}
+import type { AuthState, AuthTokens, AuthClient, AuthClientConfig } from "./types";
 
 export function createAuthClient(config: AuthClientConfig): AuthClient {
-  const listeners = new Set<(state: AuthState) => void>();
-  
-  // Initial state is always unauthenticated
-  let currentState: AuthState = {
-    isInitializing: false,
+  let state: AuthState = {
     isLoading: false,
-    userId: null,
-    sessionToken: null,
+    host: config.host,
+    userId: config.userId,
+    sessionToken: config.sessionToken,
     refreshToken: null,
     isVerified: false,
-    baseUrl: config.baseUrl,
-    ...(config.initialState || {})
-  } as AuthState;
+  };
 
-  function setState(newState: AuthState) {
-    currentState = newState;
-    config.onStateChange?.(newState);
-    listeners.forEach(callback => callback(newState));
+  const subscribers: Array<(state: AuthState) => void> = [];
+
+  function setState(newState: Partial<AuthState>) {
+    state = { ...state, ...newState };
+    subscribers.forEach(cb => cb(state));
   }
 
   function setLoading(isLoading: boolean) {
     setState({
-      ...currentState,
       isLoading
     } as AuthState);
   }
 
   function setError(error: string) {
     setState({
-      isInitializing: false,
       isLoading: false,
-      userId: null,
-      sessionToken: null,
-      refreshToken: null,
-      isVerified: false,
-      baseUrl: config.baseUrl,
       error
     });
   }
@@ -65,9 +37,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     isVerified: boolean;
   }) {
     setState({
-      isInitializing: false,
       isLoading: false,
-      baseUrl: config.baseUrl,
       ...props
     });
   }
@@ -79,11 +49,16 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       };
       
       // Add Authorization header for refresh token if available
-      if (path === 'refresh' && currentState.refreshToken) {
-        headers['Authorization'] = `Bearer ${currentState.refreshToken}`;
+      if (path === 'refresh' && state.refreshToken) {
+        headers['Authorization'] = `Bearer ${state.refreshToken}`;
       }
 
-      const response = await fetch(`${config.baseUrl}/auth/${path}`, {
+      // Add protocol if not present
+      const host = state.host.startsWith('http://') || state.host.startsWith('https://')
+        ? state.host
+        : `http://${state.host}`;
+
+      const response = await fetch(`${host}/auth/${path}`, {
         method: 'POST',
         headers,
         body: body ? JSON.stringify(body) : undefined
@@ -103,32 +78,15 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
 
   return {
     getState() {
-      return currentState;
+      return state;
     },
-
     subscribe(callback: (state: AuthState) => void) {
-      listeners.add(callback);
-      return () => listeners.delete(callback);
+      subscribers.push(callback);
+      return () => {
+        const index = subscribers.indexOf(callback);
+        if (index > -1) subscribers.splice(index, 1);
+      };
     },
-
-    async createAnonymousUser() {
-      setLoading(true);
-      try {
-        const tokens = await post<AuthTokens>('user');
-        setAuthenticated({
-          userId: tokens.userId,
-          sessionToken: tokens.sessionToken,
-          refreshToken: tokens.refreshToken,
-          isVerified: false
-        });
-      } catch (error) {
-        setError(error instanceof Error ? error.message : 'Failed to create anonymous user');
-        throw error;
-      } finally {
-        setLoading(false);
-      }
-    },
-
     async requestCode(email: string) {
       setLoading(true);
       try {
@@ -146,9 +104,8 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         setLoading(false);
       }
     },
-
     async verifyEmail(email: string, code: string) {
-      if (!currentState.userId) {
+      if (!state.userId) {
         throw new Error("No user ID available");
       }
 
@@ -157,7 +114,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         const result = await post<AuthTokens & { success: boolean }>('verify', { 
           email, 
           code,
-          userId: currentState.userId 
+          userId: state.userId 
         });
 
         setAuthenticated({
@@ -174,16 +131,15 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         setLoading(false);
       }
     },
-
     async logout() {
-      if (!currentState.userId) {
+      if (!state.userId) {
         return; // Already logged out
       }
 
       setLoading(true);
       try {
-        await post('logout', { userId: currentState.userId });
-        await this.createAnonymousUser(); // Create new anonymous user after logout
+        await post('logout', { userId: state.userId });
+        window.location.reload(); // Force reload to get new anonymous user from worker
       } catch (error) {
         setError(error instanceof Error ? error.message : 'Failed to logout');
         throw error;
@@ -191,9 +147,8 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         setLoading(false);
       }
     },
-
     async refresh() {
-      if (!currentState.refreshToken || !currentState.userId) {
+      if (!state.refreshToken || !state.userId) {
         throw new Error("No refresh token available");
       }
 
@@ -204,7 +159,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
           userId: response.userId,
           sessionToken: response.sessionToken,
           refreshToken: response.refreshToken,
-          isVerified: currentState.isVerified
+          isVerified: state.isVerified
         });
       } catch (error) {
         setError(error instanceof Error ? error.message : 'Failed to refresh token');
@@ -215,3 +170,6 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     }
   };
 }
+
+// Re-export AuthClient and AuthClientConfig types from './types'
+export type { AuthClient, AuthClientConfig } from "./types";

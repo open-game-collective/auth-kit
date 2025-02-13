@@ -5,25 +5,14 @@ export type AuthTokens = {
 };
 
 export type AuthState = {
-  isInitializing: boolean;
   isLoading: boolean;
-  baseUrl: string;
-} & (
-  | {
-      userId: string;
-      sessionToken: string;
-      refreshToken: string | null;
-      isVerified: boolean;
-      error?: undefined;
-    }
-  | {
-      userId: null;
-      sessionToken: null;
-      refreshToken: null;
-      isVerified: false;
-      error?: string;
-    }
-);
+  host: string;
+  userId: string;
+  sessionToken: string;
+  refreshToken: string | null;
+  isVerified: boolean;
+  error?: string;
+};
 
 export const STORAGE_KEYS = {
   SESSION_TOKEN: "auth_session_token",
@@ -142,3 +131,25 @@ export type AuthHooks<TEnv = any> = {
     request: Request;
   }) => Promise<void>;
 };
+
+export interface AuthClient {
+  getState(): AuthState;
+  subscribe(callback: (state: AuthState) => void): () => void;
+  requestCode(email: string): Promise<void>;
+  verifyEmail(email: string, code: string): Promise<{ success: boolean }>;
+  logout(): Promise<void>;
+  refresh(): Promise<void>;
+}
+
+export interface AuthClientConfig {
+  /** Host without protocol (e.g. "localhost:8787") */
+  host: string;
+  /** Initial user ID from worker middleware */
+  userId: string;
+  /** Initial session token from worker middleware */
+  sessionToken: string;
+  /** Optional callback when state changes */
+  onStateChange?: (state: AuthState) => void;
+  /** Optional callback for handling errors */
+  onError?: (error: Error) => void;
+}

@@ -1,106 +1,55 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createAuthClient } from './client';
 import { http, HttpResponse } from 'msw';
 import { server } from './test/setup';
 
-// Setup default handlers
-beforeEach(() => {
-  server.use(
-    // Mock request-code endpoint
-    http.post('http://localhost/auth/request-code', () => {
-      return HttpResponse.json({
-        userId: 'test-user',
-        sessionToken: 'test-session',
-        refreshToken: 'test-refresh',
-      });
-    }),
-
-    // Mock verify endpoint
-    http.post('http://localhost/auth/verify', () => {
-      return HttpResponse.json({
-        success: true,
-        userId: 'test-user',
-        sessionToken: 'test-session',
-        refreshToken: 'test-refresh',
-      });
-    }),
-
-    // Mock refresh endpoint
-    http.post('http://localhost/auth/refresh', () => {
-      return HttpResponse.json({
-        userId: 'test-user',
-        sessionToken: 'new-session',
-        refreshToken: 'new-refresh',
-      });
-    }),
-
-    // Mock logout endpoint
-    http.post('http://localhost/auth/logout', () => {
-      return HttpResponse.json({});
-    }),
-
-    // Mock anonymous user creation
-    http.post('http://localhost/auth/user', () => {
-      return HttpResponse.json({
-        userId: 'anon-user',
-        sessionToken: 'anon-session',
-        refreshToken: 'anon-refresh',
-      });
-    })
-  );
-});
+// Declare window.location as mutable for tests
+declare global {
+  interface Window {
+    location: Location;
+  }
+}
 
 describe('AuthClient', () => {
+  beforeEach(() => {
+    // Reset all handlers before each test
+    server.resetHandlers();
+  });
+
   it('should initialize with correct state', () => {
     const client = createAuthClient({
-      baseUrl: 'http://localhost',
-      initialState: {
-        userId: 'test-user',
-        sessionToken: 'test-session',
-        refreshToken: 'test-refresh',
-        isVerified: false
-      }
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
     });
 
     const state = client.getState();
     expect(state).toEqual({
-      isInitializing: false,
       isLoading: false,
       error: undefined,
       userId: 'test-user',
       sessionToken: 'test-session',
-      refreshToken: 'test-refresh',
+      refreshToken: null,
       isVerified: false,
-      baseUrl: 'http://localhost'
-    });
-  });
-
-  it('should create anonymous user', async () => {
-    const client = createAuthClient({
-      baseUrl: 'http://localhost'
-    });
-
-    const states: any[] = [];
-    client.subscribe((state) => states.push(state));
-
-    await client.createAnonymousUser();
-
-    expect(states).toHaveLength(3); // Initial -> Loading -> Success
-    expect(states[states.length - 1]).toEqual({
-      isInitializing: false,
-      isLoading: false,
-      error: undefined,
-      userId: 'anon-user',
-      sessionToken: 'anon-session',
-      refreshToken: 'anon-refresh',
-      isVerified: false,
-      baseUrl: 'http://localhost',
+      host: 'localhost:8787'
     });
   });
 
   it('should notify subscribers of state changes', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/request-code', () => {
+        return HttpResponse.json({
+          userId: 'test-user-2',
+          sessionToken: 'test-session-2',
+          refreshToken: 'test-refresh',
+        });
+      })
+    );
+
     const client = createAuthClient({
-      baseUrl: 'http://localhost',
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
     });
 
     const states: any[] = [];
@@ -110,20 +59,39 @@ describe('AuthClient', () => {
 
     expect(states).toHaveLength(3); // Initial -> Loading -> Success
     expect(states[states.length - 1]).toEqual({
-      isInitializing: false,
       isLoading: false,
       error: undefined,
-      userId: 'test-user',
-      sessionToken: 'test-session',
+      userId: 'test-user-2',
+      sessionToken: 'test-session-2',
       refreshToken: 'test-refresh',
       isVerified: false,
-      baseUrl: 'http://localhost',
+      host: 'localhost:8787'
     });
   });
 
   it('should handle email verification flow', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/request-code', () => {
+        return HttpResponse.json({
+          userId: 'test-user-2',
+          sessionToken: 'test-session-2',
+          refreshToken: 'test-refresh',
+        });
+      }),
+      http.post('http://localhost:8787/auth/verify', () => {
+        return HttpResponse.json({
+          success: true,
+          userId: 'test-user-2',
+          sessionToken: 'test-session-2',
+          refreshToken: 'test-refresh',
+        });
+      })
+    );
+
     const client = createAuthClient({
-      baseUrl: 'http://localhost',
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
     });
 
     // First request the code to get a userId
@@ -134,70 +102,84 @@ describe('AuthClient', () => {
 
     expect(result).toEqual({ success: true });
     expect(client.getState()).toEqual({
-      isInitializing: false,
       isLoading: false,
       error: undefined,
-      userId: 'test-user',
-      sessionToken: 'test-session',
+      userId: 'test-user-2',
+      sessionToken: 'test-session-2',
       refreshToken: 'test-refresh',
       isVerified: true,
-      baseUrl: 'http://localhost',
+      host: 'localhost:8787'
     });
   });
 
-  it('should handle logout by creating new anonymous user', async () => {
+  it('should handle logout by reloading page', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/logout', () => {
+        return HttpResponse.json({ success: true });
+      })
+    );
+
     const client = createAuthClient({
-      baseUrl: 'http://localhost',
-      initialState: {
-        userId: 'test-user',
-        sessionToken: 'test-session',
-        refreshToken: 'test-refresh',
-        isVerified: false
-      }
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
+    });
+
+    // Mock window.location.reload
+    const reloadMock = vi.fn();
+    const originalReload = window.location.reload;
+    Object.defineProperty(window.location, 'reload', {
+      value: reloadMock,
+      configurable: true
     });
 
     await client.logout();
 
-    expect(client.getState()).toEqual({
-      isInitializing: false,
-      isLoading: false,
-      error: undefined,
-      userId: 'anon-user',
-      sessionToken: 'anon-session',
-      refreshToken: 'anon-refresh',
-      isVerified: false,
-      baseUrl: 'http://localhost',
+    expect(reloadMock).toHaveBeenCalledTimes(1);
+
+    // Restore original reload
+    Object.defineProperty(window.location, 'reload', {
+      value: originalReload,
+      configurable: true
     });
   });
 
   it('should handle refresh token flow', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/refresh', () => {
+        return HttpResponse.json({
+          userId: 'test-user',
+          sessionToken: 'new-session',
+          refreshToken: 'new-refresh',
+        });
+      })
+    );
+
     const client = createAuthClient({
-      baseUrl: 'http://localhost',
-      initialState: {
-        userId: 'test-user',
-        sessionToken: 'test-session',
-        refreshToken: 'test-refresh',
-        isVerified: false
-      }
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
     });
+
+    // Set refresh token in state
+    client.getState().refreshToken = 'test-refresh';
 
     await client.refresh();
 
     expect(client.getState()).toEqual({
-      isInitializing: false,
       isLoading: false,
       error: undefined,
       userId: 'test-user',
       sessionToken: 'new-session',
       refreshToken: 'new-refresh',
       isVerified: false,
-      baseUrl: 'http://localhost',
+      host: 'localhost:8787'
     });
   });
 
   it('should handle API errors', async () => {
     server.use(
-      http.post('http://localhost/auth/request-code', () => {
+      http.post('http://localhost:8787/auth/request-code', () => {
         return new HttpResponse('Invalid email', {
           status: 400,
           headers: {
@@ -208,20 +190,80 @@ describe('AuthClient', () => {
     );
 
     const client = createAuthClient({
-      baseUrl: 'http://localhost',
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
     });
 
     await expect(client.requestCode('invalid')).rejects.toThrow();
 
     expect(client.getState()).toEqual({
-      isInitializing: false,
       isLoading: false,
       error: 'Invalid email',
-      userId: null,
-      sessionToken: null,
+      userId: 'test-user',
+      sessionToken: 'test-session',
       refreshToken: null,
       isVerified: false,
-      baseUrl: 'http://localhost',
+      host: 'localhost:8787'
     });
+  });
+
+  it('should maintain sessionToken in state after initialization', () => {
+    const client = createAuthClient({
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'initial-session-token'
+    });
+
+    expect(client.getState().sessionToken).toBe('initial-session-token');
+  });
+
+  it('should update sessionToken after successful verification', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/verify', () => {
+        return HttpResponse.json({
+          success: true,
+          userId: 'test-user',
+          sessionToken: 'new-session-token',
+          refreshToken: 'test-refresh'
+        });
+      })
+    );
+
+    const client = createAuthClient({
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'initial-session-token'
+    });
+
+    await client.verifyEmail('test@example.com', '123456');
+
+    expect(client.getState().sessionToken).toBe('new-session-token');
+  });
+
+  it('should update sessionToken after successful refresh', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/refresh', () => {
+        return HttpResponse.json({
+          success: true,
+          userId: 'test-user',
+          sessionToken: 'refreshed-session-token',
+          refreshToken: 'new-refresh'
+        });
+      })
+    );
+
+    const client = createAuthClient({
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'initial-session-token'
+    });
+
+    // Set refresh token in state
+    client.getState().refreshToken = 'test-refresh';
+
+    await client.refresh();
+
+    expect(client.getState().sessionToken).toBe('refreshed-session-token');
   });
 }); 
