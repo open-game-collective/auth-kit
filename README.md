@@ -458,10 +458,14 @@ The client provides methods for managing authentication:
 
 `withAuth<TEnv>(handler, config)`
 
-A middleware that handles authentication and supplies user context to your server functions. It manages:
-- Automatic anonymous user creation.
-- JWT-based session and refresh tokens.
-- Secure, HTTP-only cookie handling.
+A middleware that integrates authentication directly into your server application. It:
+- Exposes all `/auth/*` endpoints (login, logout, refresh, etc.) in the same application running your React app
+- Handles authentication and supplies user context to your server functions
+- Creates anonymous users automatically
+- Manages JWT-based session and refresh tokens
+- Handles secure, HTTP-only cookie management
+
+This means you don't need a separate auth server - all auth functionality runs alongside your main application.
 
 ### ⚛️ @open-game-collective/auth-kit/react
 
