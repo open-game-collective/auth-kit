@@ -38,57 +38,171 @@ pnpm add @open-game-collective/auth-kit
 
 ## Usage Guide
 
-### Web Applications (with Cloudflare Workers)
+### Web Applications (with Remix and Cloudflare Workers)
 
-For web applications using Cloudflare Workers, the middleware automatically handles anonymous user creation and token management:
+For web applications using Remix and Cloudflare Workers, here's how to set up authentication:
 
 ```typescript
 // app/worker.ts
-import { withAuth } from "@open-game-collective/auth-kit/worker";
+import { AuthHooks, withAuth } from "@open-game-collective/auth-kit/worker";
+import { createRequestHandler, logDevReady } from "@remix-run/cloudflare";
+import * as build from "@remix-run/dev/server-build";
+import { Env } from "./env";
 
-const authHooks = {
-  getUserIdByEmail: async ({ email, env }) => {
+if (process.env.NODE_ENV === "development") {
+  logDevReady(build);
+}
+
+const handleRemixRequest = createRequestHandler(build);
+
+const authHooks: AuthHooks<Env> = {
+  getUserIdByEmail: async ({ email, env, request }) => {
     return await env.KV_STORAGE.get(`email:${email}`);
   },
-  storeVerificationCode: async ({ email, code, env }) => {
-    await env.KV_STORAGE.put(`code:${email}`, code, { expirationTtl: 600 });
+
+  storeVerificationCode: async ({ email, code, env, request }) => {
+    await env.KV_STORAGE.put(`code:${email}`, code, {
+      expirationTtl: 600,
+    });
   },
-  verifyVerificationCode: async ({ email, code, env }) => {
+
+  verifyVerificationCode: async ({ email, code, env, request }) => {
     const storedCode = await env.KV_STORAGE.get(`code:${email}`);
     return storedCode === code;
   },
-  sendVerificationCode: async ({ email, code, env }) => {
-    // Your email sending logic here
-    return true;
-  }
+
+  sendVerificationCode: async ({ email, code, env, request }) => {
+    try {
+      const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.SENDGRID_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email }] }],
+          from: { email: "auth@yourdomain.com" },
+          subject: "Your verification code",
+          content: [{ type: "text/plain", value: `Your code is: ${code}` }],
+        }),
+      });
+      return response.ok;
+    } catch (error) {
+      console.error("Failed to send email:", error);
+      return false;
+    }
+  },
+
+  onNewUser: async ({ userId, env, request }) => {
+    await env.KV_STORAGE.put(
+      `user:${userId}`,
+      JSON.stringify({
+        created: new Date().toISOString(),
+      })
+    );
+  },
+
+  onAuthenticate: async ({ userId, email, env, request }) => {
+    await env.KV_STORAGE.put(
+      `user:${userId}:lastLogin`,
+      new Date().toISOString()
+    );
+  },
+
+  onEmailVerified: async ({ userId, email, env, request }) => {
+    await env.KV_STORAGE.put(`user:${userId}:verified`, "true");
+    await env.KV_STORAGE.put(`email:${email}`, userId);
+  },
 };
 
+const handler = withAuth<Env>(
+  async (request, env, { userId, sessionId, sessionToken }) => {
+    try {
+      return await handleRemixRequest(request, {
+        env,
+        userId,
+        sessionId,
+        sessionToken,
+        requestId: crypto.randomUUID(),
+      });
+    } catch (error) {
+      console.error("Error processing request:", error);
+      return new Response("Internal Error", { status: 500 });
+    }
+  },
+  { hooks: authHooks }
+);
+
 export default {
-  async fetch(request: Request, env: Env) {
-    return withAuth(request, env, { hooks: authHooks });
-  }
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    return handler(request, env);
+  },
 };
 
 // app/root.tsx
 import { createAuthClient } from "@open-game-collective/auth-kit/client";
-import { AuthContext } from "./auth.context";
+import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import {
+  json,
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+  useLoaderData,
+} from "@remix-run/react";
+import { useState } from "react";
+import { AuthProvider } from "./context/auth-context";
+
+interface LoaderData {
+  userId: string;
+  sessionToken: string;
+  host: string;
+}
+
+export async function loader({ request, context }: LoaderFunctionArgs) {
+  return json<LoaderData>({
+    userId: context.userId,
+    sessionToken: context.sessionToken,
+    host: context.env.WEB_HOST,
+  });
+}
 
 export default function App() {
-  const { userId, sessionToken } = useLoaderData<typeof loader>();
-  
-  const client = useMemo(() => createAuthClient({
-    host: "localhost:8787",
-    userId,
-    sessionToken,
-  }), [userId, sessionToken]);
+  const { userId, sessionToken, host } = useLoaderData<typeof loader>();
+
+  const [authClient] = useState(
+    createAuthClient({
+      host,
+      userId,
+      sessionToken,
+    })
+  );
 
   return (
-    <AuthContext.Provider client={client}>
-      <YourApp />
-    </AuthContext.Provider>
+    <html lang="en">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <Meta />
+        <Links />
+      </head>
+      <body>
+        <AuthProvider client={authClient}>
+          <Outlet />
+        </AuthProvider>
+        <ScrollRestoration />
+        <Scripts />
+      </body>
+    </html>
   );
 }
 ```
+
+The setup above demonstrates:
+1. Worker setup with auth hooks for KV storage and email verification
+2. Root component that initializes the auth client with user context from the loader
+3. Integration with Remix's loader data and context providers
 
 ### Mobile Applications (React Native)
 
