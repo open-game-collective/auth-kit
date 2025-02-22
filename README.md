@@ -220,6 +220,14 @@ const AUTH_KEYS = {
   REFRESH_TOKEN: 'auth_refresh_token'
 } as const;
 
+async function clearAuthTokens() {
+  await Promise.all([
+    AsyncStorage.removeItem(AUTH_KEYS.USER_ID),
+    AsyncStorage.removeItem(AUTH_KEYS.SESSION_TOKEN),
+    AsyncStorage.removeItem(AUTH_KEYS.REFRESH_TOKEN)
+  ]);
+}
+
 export async function initializeAuth() {
   // Try to load existing tokens
   const [userId, sessionToken, refreshToken] = await Promise.all([
@@ -261,6 +269,7 @@ import { AuthContext } from "./auth.context";
 export default function App() {
   const [client, setClient] = useState<AuthClient | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     initializeAuth()
@@ -268,14 +277,41 @@ export default function App() {
       .finally(() => setIsLoading(false));
   }, []);
 
-  if (isLoading) {
+  const handleLogout = useCallback(async () => {
+    if (!client || isLoggingOut) return;
+    
+    // Immediately set logging out state and clear client
+    setIsLoggingOut(true);
+    setClient(null);
+
+    try {
+      // Call client logout to clear server-side session
+      await client.logout();
+      
+      // Clear stored tokens
+      await clearAuthTokens();
+      
+      // Create new anonymous session
+      const newClient = await initializeAuth();
+      setClient(newClient);
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }, [client, isLoggingOut]);
+
+  if (isLoading || isLoggingOut || !client) {
     return <LoadingScreen />;
   }
 
   return (
-    <AuthContext.Provider client={client!}>
+    <AuthContext.Provider client={client}>
       <NavigationContainer>
         <YourApp />
+        <Button 
+          title="Logout" 
+          onPress={handleLogout}
+          disabled={isLoggingOut} 
+        />
       </NavigationContainer>
     </AuthContext.Provider>
   );
@@ -384,7 +420,7 @@ const client = createAuthClient({
 The client provides methods for managing authentication:
 - `requestCode(email)`: Initiates the email verification process.
 - `verifyEmail(email, code)`: Verifies the user's email with the provided code.
-- `logout()`: Logs out the current user and clears the client state. Your application should handle any post-logout actions like clearing storage or navigation.
+- `logout()`: Logs out the current user and clears the session. For web apps, the worker middleware will automatically create a new anonymous session. For mobile apps, you'll need to handle token cleanup and client state reset manually.
 - `refresh()`: Refreshes the session token. Only works if a refresh token was provided during initialization.
 
 ### 🖥️ auth-kit/worker
@@ -673,6 +709,249 @@ The mock client makes it easy to:
 - Test complex user interactions
 - Validate state transitions
 
+### Testing Mobile Logout Scenarios
+
+```typescript
+import { render, screen, waitFor } from '@testing-library/react-native';
+import { createAuthMockClient } from "@open-game-collective/auth-kit/test";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import App from './App';
+
+// Mock AsyncStorage
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  removeItem: jest.fn(() => Promise.resolve()),
+  getItem: jest.fn(),
+  setItem: jest.fn()
+}));
+
+describe('Mobile App Logout', () => {
+  beforeEach(() => {
+    // Clear all mocks before each test
+    jest.clearAllMocks();
+  });
+
+  it('handles successful logout flow', async () => {
+    // Setup initial mock client
+    const mockClient = createAuthMockClient({
+      initialState: {
+        isLoading: false,
+        host: 'test.com',
+        userId: 'test-user',
+        sessionToken: 'test-session',
+        refreshToken: 'test-refresh',
+        isVerified: true
+      }
+    });
+
+    // Mock successful initializeAuth for new anonymous session
+    const newMockClient = createAuthMockClient({
+      initialState: {
+        isLoading: false,
+        host: 'test.com',
+        userId: 'anon-user',
+        sessionToken: 'anon-session',
+        refreshToken: 'anon-refresh',
+        isVerified: false
+      }
+    });
+
+    // Mock the initializeAuth function
+    jest.mock('./auth', () => ({
+      initializeAuth: jest.fn()
+        .mockResolvedValueOnce(mockClient)      // First call returns initial client
+        .mockResolvedValueOnce(newMockClient),  // Second call returns anonymous client
+    }));
+
+    const { getByText } = render(<App />);
+
+    // Wait for initial render
+    await waitFor(() => {
+      expect(getByText('Welcome back!')).toBeTruthy(); // Verified user content
+    });
+
+    // Trigger logout
+    const logoutButton = getByText('Logout');
+    fireEvent.press(logoutButton);
+
+    // Verify loading state shows
+    expect(getByText('Loading...')).toBeTruthy();
+
+    // Verify client.logout was called
+    expect(mockClient.logout).toHaveBeenCalled();
+
+    // Verify AsyncStorage tokens were cleared
+    expect(AsyncStorage.removeItem).toHaveBeenCalledWith('auth_user_id');
+    expect(AsyncStorage.removeItem).toHaveBeenCalledWith('auth_session_token');
+    expect(AsyncStorage.removeItem).toHaveBeenCalledWith('auth_refresh_token');
+
+    // Verify new anonymous session is created
+    await waitFor(() => {
+      expect(getByText('Verify Email')).toBeTruthy(); // Unverified user content
+    });
+  });
+
+  it('handles logout when client is already null', () => {
+    const { getByText } = render(<App />);
+    
+    // Set client to null
+    const logoutButton = getByText('Logout');
+    fireEvent.press(logoutButton);
+    fireEvent.press(logoutButton); // Press again while client is null
+    
+    // Should not throw and should show loading
+    expect(getByText('Loading...')).toBeTruthy();
+  });
+
+  it('handles logout during loading state', () => {
+    const mockClient = createAuthMockClient({
+      initialState: {
+        isLoading: true,
+        host: 'test.com',
+        userId: 'test-user',
+        sessionToken: 'test-session',
+        refreshToken: null,
+        isVerified: false
+      }
+    });
+
+    const { getByText } = render(<App />);
+    
+    const logoutButton = getByText('Logout');
+    fireEvent.press(logoutButton);
+    
+    // Button should be disabled
+    expect(logoutButton).toBeDisabled();
+  });
+
+  it('handles failed logout gracefully', async () => {
+    const mockClient = createAuthMockClient({
+      initialState: {
+        isLoading: false,
+        host: 'test.com',
+        userId: 'test-user',
+        sessionToken: 'test-session',
+        refreshToken: null,
+        isVerified: true
+      }
+    });
+
+    // Make logout fail
+    mockClient.logout.mockRejectedValueOnce(new Error('Network error'));
+
+    // Mock AsyncStorage.removeItem to fail
+    (AsyncStorage.removeItem as jest.Mock).mockRejectedValueOnce(new Error('Storage error'));
+
+    const { getByText } = render(<App />);
+
+    const logoutButton = getByText('Logout');
+    fireEvent.press(logoutButton);
+
+    // Should still show loading initially
+    expect(getByText('Loading...')).toBeTruthy();
+
+    // Should recover and show error state
+    await waitFor(() => {
+      expect(getByText('Error logging out. Please try again.')).toBeTruthy();
+    });
+
+    // isLoggingOut should be reset
+    expect(logoutButton).not.toBeDisabled();
+  });
+
+  it('preserves logout button disabled state while logging out', async () => {
+    const mockClient = createAuthMockClient({
+      initialState: {
+        isLoading: false,
+        host: 'test.com',
+        userId: 'test-user',
+        sessionToken: 'test-session',
+        refreshToken: null,
+        isVerified: true
+      }
+    });
+
+    // Add delay to logout
+    mockClient.logout.mockImplementation(() => new Promise(resolve => setTimeout(resolve, 1000)));
+
+    const { getByText } = render(<App />);
+
+    const logoutButton = getByText('Logout');
+    fireEvent.press(logoutButton);
+
+    // Button should be immediately disabled
+    expect(logoutButton).toBeDisabled();
+
+    // Should stay disabled during the logout process
+    await waitFor(() => {
+      expect(logoutButton).toBeDisabled();
+    }, { timeout: 500 });
+
+    // Complete logout
+    await waitFor(() => {
+      expect(getByText('Verify Email')).toBeTruthy();
+    });
+  });
+
+  it('handles rapid logout attempts', async () => {
+    const mockClient = createAuthMockClient({
+      initialState: {
+        isLoading: false,
+        host: 'test.com',
+        userId: 'test-user',
+        sessionToken: 'test-session',
+        refreshToken: null,
+        isVerified: true
+      }
+    });
+
+    const { getByText } = render(<App />);
+
+    const logoutButton = getByText('Logout');
+    
+    // Attempt multiple rapid logout clicks
+    fireEvent.press(logoutButton);
+    fireEvent.press(logoutButton);
+    fireEvent.press(logoutButton);
+
+    // Verify logout was only called once
+    expect(mockClient.logout).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
+These tests demonstrate:
+- Complete coverage of the logout flow
+- Handling of edge cases and error states
+- Proper state management during logout
+- AsyncStorage interaction testing
+- Loading and disabled states
+- Race condition prevention
+- Error recovery
+
+Key testing patterns shown:
+- Mocking both success and failure cases
+- Testing async operations with `waitFor`
+- Verifying UI state transitions
+- Checking proper cleanup of resources
+- Testing user interactions
+- Validating error handling
+- Ensuring proper loading states
+
 ---
 
 Happy Coding! 🔐
+
+// Web example - add this component
+function LogoutButton() {
+  const client = AuthContext.useClient();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await client.logout();
+    // For web apps, the worker middleware will clear the cookies
+    // and create a new anonymous session automatically
+    navigate('/');
+  };
+
+  return <button onClick={handleLogout}>Logout</button>;
+}
