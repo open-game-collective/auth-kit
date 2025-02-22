@@ -364,26 +364,26 @@ The key differences between web and mobile implementations:
 
 Auth Kit is comprised of three core components:
 
-1. **Worker Middleware (`auth-kit/worker`)**
+1. **Worker Middleware (`@open-game-collective/auth-kit/worker`)**
    - Handles all `/auth/*` routes automatically.
    - Manages JWT-based session tokens (15 minutes) and refresh tokens (7 days).
    - Creates anonymous users when no valid session exists.
    - Supplies `userId` and `sessionId` to your React Router loaders.
 
-2. **Auth Client (`auth-kit/client`)**
+2. **Auth Client (`@open-game-collective/auth-kit/client`)**
    - Manages client-side auth state.
    - Automatically refreshes tokens.
    - Provides methods for email verification and logout.
    - Supports state subscriptions and pub/sub updates.
 
-3. **React Integration (`auth-kit/react`)**
+3. **React Integration (`@open-game-collective/auth-kit/react`)**
    - Offers hooks for accessing auth state.
    - Provides conditional components for loading, authentication, and verification states.
    - Leverages Suspense for efficient UI updates.
 
 ## API Reference
 
-### 🔐 auth-kit/client
+### 🔐 @open-game-collective/auth-kit/client
 
 `createAnonymousUser(config: AnonymousUserConfig): Promise<UserCredentials>`
 
@@ -446,7 +446,7 @@ The client provides methods for managing authentication:
 - `logout()`: Logs out the current user and clears the session. For web apps, the worker middleware will automatically create a new anonymous session. For mobile apps, you'll need to handle token cleanup and client state reset manually.
 - `refresh()`: Refreshes the session token. Only works if a refresh token was provided during initialization.
 
-### 🖥️ auth-kit/worker
+### 🖥️ @open-game-collective/auth-kit/worker
 
 `withAuth<TEnv>(handler, config)`
 
@@ -455,7 +455,7 @@ A middleware that handles authentication and supplies user context to your worke
 - JWT-based session and refresh tokens.
 - Secure, HTTP-only cookie handling.
 
-### ⚛️ auth-kit/react
+### ⚛️ @open-game-collective/auth-kit/react
 
 `createAuthContext()`
 
@@ -464,7 +464,7 @@ Creates a React context for auth state management, providing:
 - Hooks: `useClient` and `useSelector` for accessing and subscribing to state.
 - Conditional components: `<Loading>`, `<Authenticated>`, `<Verified>`, and `<Unverified>`.
 
-### 🧪 auth-kit/test
+### 🧪 @open-game-collective/auth-kit/test
 
 `createAuthMockClient(config)`
 
