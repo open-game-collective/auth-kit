@@ -1,6 +1,6 @@
 # 🔐 Auth Kit
 
-A full-stack authentication toolkit for React applications built on Cloudflare Workers. Auth Kit provides a secure, low-latency authentication system with email verification and token management. Perfect for applications that need a robust auth system with a great developer experience.
+A headless, isomorphic authentication toolkit that runs seamlessly across server-side, web, and React Native environments. Built on Cloudflare Workers, Auth Kit provides a secure, low-latency authentication system with email verification and token management. Perfect for applications that need a robust, platform-agnostic auth system with a great developer experience.
 
 ## Table of Contents
 
@@ -29,13 +29,15 @@ pnpm add @open-game-collective/auth-kit
 
 ## Key Features
 
+- 🌐 **Isomorphic & Headless**: Runs anywhere - server-side, web browsers, or React Native. Bring your own UI components.
 - 🎭 **Anonymous-First Auth**: Users start with an anonymous session that can be upgraded to a verified account.
 - 📧 **Email Verification**: Secure email verification flow with customizable storage and delivery options.
 - 🔐 **JWT-Based Tokens**: Secure session and refresh tokens with automatic refresh.
 - ⚡️ **Edge-Ready**: Optimized for Cloudflare Workers for minimal latency.
 - 🎯 **Type-Safe**: Full TypeScript support with detailed types.
 - 🎨 **React Integration**: Ready-to-use hooks and components for auth state management.
-- 🔌 **Customizable**: Integrate with your own storage and email delivery systems.
+- 🔌 **Customizable**: Integrate with your own storage, email delivery systems, and UI components.
+- 📱 **Platform Agnostic**: Same API and behavior across web and mobile platforms.
 
 ## Usage Guide
 
