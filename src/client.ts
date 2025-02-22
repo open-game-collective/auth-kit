@@ -1,6 +1,6 @@
-import type { AuthState, AuthTokens, AuthClient, AuthClientConfig } from "./types";
+import type { AuthState, UserCredentials, AuthClient, AuthClientConfig } from "./types";
 
-export async function createAnonymousUser(host: string): Promise<AuthTokens> {
+export async function createAnonymousUser(host: string): Promise<UserCredentials> {
   // Add protocol if not present
   const apiHost = host.startsWith('http://') || host.startsWith('https://')
     ? host
@@ -27,7 +27,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     host: config.host,
     userId: config.userId,
     sessionToken: config.sessionToken,
-    refreshToken: null,
+    refreshToken: config.refreshToken || null,
     isVerified: false,
   };
 
@@ -111,7 +111,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     async requestCode(email: string) {
       setLoading(true);
       try {
-        const response = await post<AuthTokens>('request-code', { email });
+        const response = await post<UserCredentials>('request-code', { email });
         setAuthenticated({
           userId: response.userId,
           sessionToken: response.sessionToken,
@@ -132,7 +132,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
 
       setLoading(true);
       try {
-        const result = await post<AuthTokens & { success: boolean }>('verify', { 
+        const result = await post<UserCredentials & { success: boolean }>('verify', { 
           email, 
           code,
           userId: state.userId 
@@ -160,7 +160,14 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       setLoading(true);
       try {
         await post('logout', { userId: state.userId });
-        window.location.reload(); // Force reload to get new anonymous user from worker
+        // Clear local state
+        setState({
+          ...state,
+          userId: '',
+          sessionToken: '',
+          refreshToken: null,
+          isVerified: false
+        });
       } catch (error) {
         setError(error instanceof Error ? error.message : 'Failed to logout');
         throw error;
@@ -169,13 +176,13 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       }
     },
     async refresh() {
-      if (!state.refreshToken || !state.userId) {
-        throw new Error("No refresh token available");
+      if (!state.refreshToken) {
+        throw new Error("No refresh token available. For web applications, token refresh is handled by the worker middleware.");
       }
 
       setLoading(true);
       try {
-        const response = await post<AuthTokens>('refresh');
+        const response = await post<UserCredentials>('refresh');
         setAuthenticated({
           userId: response.userId,
           sessionToken: response.sessionToken,

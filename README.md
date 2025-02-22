@@ -15,6 +15,7 @@ A full-stack authentication toolkit for React applications built on Cloudflare W
 - [API Reference](#api-reference)
 - [Troubleshooting](#troubleshooting)
 - [TypeScript Types](#typescript-types)
+- [Testing with Storybook](#testing-with-storybook)
 
 ## Installation
 
@@ -364,20 +365,27 @@ Creates a new auth client instance.
 
 Example:
 ```typescript
+// Web usage (refresh handled by middleware)
 const client = createAuthClient({
   host: "localhost:8787",
   userId: "user_id_from_cookie",
-  sessionToken: "session_token_from_cookie",
-  onStateChange: state => console.log("Auth state updated:", state),
-  onError: error => console.error("Auth error:", error)
+  sessionToken: "session_token_from_cookie"
+});
+
+// Mobile usage (manual refresh handling)
+const client = createAuthClient({
+  host: "your-worker.workers.dev",
+  userId: "user_id",
+  sessionToken: "session_token",
+  refreshToken: "refresh_token" // Optional, but recommended for mobile
 });
 ```
 
-Methods provided:
+The client provides methods for managing authentication:
 - `requestCode(email)`: Initiates the email verification process.
 - `verifyEmail(email, code)`: Verifies the user's email with the provided code.
-- `logout()`: Logs out the current user.
-- `refresh()`: Refreshes the session token.
+- `logout()`: Logs out the current user and clears the client state. Your application should handle any post-logout actions like clearing storage or navigation.
+- `refresh()`: Refreshes the session token. Only works if a refresh token was provided during initialization.
 
 ### 🖥️ auth-kit/worker
 
@@ -396,6 +404,86 @@ Creates a React context for auth state management, providing:
 - A Provider for passing down the auth client.
 - Hooks: `useClient` and `useSelector` for accessing and subscribing to state.
 - Conditional components: `<Loading>`, `<Authenticated>`, `<Verified>`, and `<Unverified>`.
+
+### 🧪 auth-kit/test
+
+`createAuthMockClient(config)`
+
+Creates a mock auth client for testing. This is useful for testing UI components that depend on auth state without needing a real server.
+
+Example:
+```typescript
+import { createAuthMockClient } from "@open-game-collective/auth-kit/test";
+
+it('shows verified content when user is verified', () => {
+  const mockClient = createAuthMockClient({
+    initialState: {
+      isLoading: false,
+      host: 'test.com',
+      userId: 'test-user',
+      sessionToken: 'test-session',
+      refreshToken: null,
+      isVerified: true
+    }
+  });
+
+  render(
+    <AuthContext.Provider client={mockClient}>
+      <YourComponent />
+    </AuthContext.Provider>
+  );
+
+  // Test that verified content is shown
+  expect(screen.getByText('Welcome back!')).toBeInTheDocument();
+});
+
+it('handles email verification flow', async () => {
+  const mockClient = createAuthMockClient({
+    initialState: {
+      isLoading: false,
+      host: 'test.com',
+      userId: 'test-user',
+      sessionToken: 'test-session',
+      refreshToken: null,
+      isVerified: false
+    }
+  });
+
+  render(
+    <AuthContext.Provider client={mockClient}>
+      <VerificationComponent />
+    </AuthContext.Provider>
+  );
+
+  // Simulate verification flow
+  await userEvent.click(screen.getByText('Verify Email'));
+  
+  // Check that requestCode was called
+  expect(mockClient.requestCode).toHaveBeenCalledWith('test@example.com');
+  
+  // Update mock state to simulate loading
+  mockClient.setState({
+    isLoading: true
+  });
+  
+  expect(screen.getByText('Sending code...')).toBeInTheDocument();
+  
+  // Update mock state to simulate success
+  mockClient.setState({
+    isLoading: false,
+    isVerified: true
+  });
+  
+  expect(screen.getByText('Email verified!')).toBeInTheDocument();
+});
+
+The mock client provides additional testing utilities:
+
+- `setState(partial)`: Update the mock client state
+- `getState()`: Get current state
+- All client methods are Jest spies for tracking calls
+- State changes are synchronous for easier testing
+- No actual network requests are made
 
 ## Troubleshooting
 
@@ -428,6 +516,162 @@ export type AuthState = {
 ```
 
 Detailed API types are available within the package for full type-safety.
+
+## Testing with Storybook
+
+The mock client is particularly useful for testing components in Storybook, especially for verifying complex interactions and state changes.
+
+### Basic Story with Mock Client
+
+```typescript
+import type { Meta, StoryObj } from '@storybook/react';
+import { createAuthMockClient } from "@open-game-collective/auth-kit/test";
+import { AuthContext } from "@open-game-collective/auth-kit/react";
+
+const meta: Meta<typeof ProfilePage> = {
+  component: ProfilePage,
+};
+
+export default meta;
+type Story = StoryObj<typeof ProfilePage>;
+
+export const UnverifiedUser: Story = {
+  render: () => {
+    const mockClient = createAuthMockClient({
+      initialState: {
+        isLoading: false,
+        host: 'test.com',
+        userId: 'test-user',
+        sessionToken: 'test-session',
+        refreshToken: null,
+        isVerified: false
+      }
+    });
+
+    return (
+      <AuthContext.Provider client={mockClient}>
+        <ProfilePage />
+      </AuthContext.Provider>
+    );
+  }
+};
+```
+
+### Testing Complex Interactions
+
+```typescript
+export const EmailVerificationFlow: Story = {
+  play: async ({ canvasElement, mount }) => {
+    // Create mock client with spy methods
+    const mockClient = createAuthMockClient({
+      initialState: {
+        isLoading: false,
+        host: 'test.com',
+        userId: 'test-user',
+        sessionToken: 'test-session',
+        refreshToken: null,
+        isVerified: false
+      }
+    });
+
+    // Spy on the requestCode method
+    const requestCodeSpy = vi.spyOn(mockClient, 'requestCode');
+    const verifyEmailSpy = vi.spyOn(mockClient, 'verifyEmail');
+
+    await mount(
+      <AuthContext.Provider client={mockClient}>
+        <ProfilePage />
+      </AuthContext.Provider>
+    );
+
+    const canvas = within(canvasElement);
+
+    // Fill out email form
+    await userEvent.type(
+      await canvas.findByLabelText('Email'),
+      'test@example.com'
+    );
+
+    // Click verify button
+    await userEvent.click(canvas.getByText('Verify Email'));
+
+    // Verify requestCode was called with correct email
+    expect(requestCodeSpy).toHaveBeenCalledWith('test@example.com');
+
+    // Simulate loading state
+    mockClient.setState({ isLoading: true });
+    expect(canvas.getByText('Sending code...')).toBeInTheDocument();
+
+    // Simulate code sent
+    mockClient.setState({ isLoading: false });
+
+    // Enter verification code
+    await userEvent.type(
+      await canvas.findByLabelText('Verification Code'),
+      '123456'
+    );
+
+    // Submit code
+    await userEvent.click(canvas.getByText('Submit Code'));
+
+    // Verify verifyEmail was called with correct parameters
+    expect(verifyEmailSpy).toHaveBeenCalledWith('test@example.com', '123456');
+
+    // Verify the final success state
+    mockClient.setState({ isVerified: true });
+    expect(canvas.getByText('Email verified!')).toBeInTheDocument();
+  }
+};
+```
+
+### Testing Error States
+
+```typescript
+export const EmailVerificationError: Story = {
+  play: async ({ canvasElement, mount }) => {
+    const mockClient = createAuthMockClient({
+      initialState: {
+        isLoading: false,
+        host: 'test.com',
+        userId: 'test-user',
+        sessionToken: 'test-session',
+        refreshToken: null,
+        isVerified: false
+      }
+    });
+
+    await mount(
+      <AuthContext.Provider client={mockClient}>
+        <ProfilePage />
+      </AuthContext.Provider>
+    );
+
+    const canvas = within(canvasElement);
+
+    // Simulate an error state
+    mockClient.setState({
+      error: 'Invalid verification code'
+    });
+
+    // Verify error is displayed
+    expect(canvas.getByText('Invalid verification code')).toBeInTheDocument();
+
+    // Test error dismissal
+    await userEvent.click(canvas.getByText('Try Again'));
+    
+    // Verify error is cleared
+    mockClient.setState({ error: undefined });
+    expect(canvas.queryByText('Invalid verification code')).not.toBeInTheDocument();
+  }
+};
+```
+
+The mock client makes it easy to:
+- Test different initial states
+- Verify method calls with spies
+- Simulate loading and error states
+- Test complex user interactions
+- Validate state transitions
 
 ---
 

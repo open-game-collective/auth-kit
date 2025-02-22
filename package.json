@@ -1,6 +1,6 @@
 {
   "name": "@open-game-collective/auth-kit",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publishConfig": {
     "access": "public"
   },
@@ -16,6 +16,10 @@
     "./worker": {
       "types": "./src/worker.ts",
       "import": "./src/worker.ts"
+    },
+    "./test": {
+      "types": "./src/test.ts",
+      "import": "./src/test.ts"
     }
   },
   "files": [

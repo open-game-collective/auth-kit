@@ -148,7 +148,7 @@ describe('AuthClient', () => {
     });
   });
 
-  it('should handle logout by reloading page', async () => {
+  it('should handle logout by clearing state', async () => {
     server.use(
       http.post('http://localhost:8787/auth/logout', () => {
         return HttpResponse.json({ success: true });
@@ -161,22 +161,16 @@ describe('AuthClient', () => {
       sessionToken: 'test-session'
     });
 
-    // Mock window.location.reload
-    const reloadMock = vi.fn();
-    const originalReload = window.location.reload;
-    Object.defineProperty(window.location, 'reload', {
-      value: reloadMock,
-      configurable: true
-    });
-
     await client.logout();
 
-    expect(reloadMock).toHaveBeenCalledTimes(1);
-
-    // Restore original reload
-    Object.defineProperty(window.location, 'reload', {
-      value: originalReload,
-      configurable: true
+    expect(client.getState()).toEqual({
+      isLoading: false,
+      host: 'localhost:8787',
+      userId: '',
+      sessionToken: '',
+      refreshToken: null,
+      isVerified: false,
+      error: undefined
     });
   });
 

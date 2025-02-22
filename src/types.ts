@@ -1,4 +1,4 @@
-export type AuthTokens = {
+export type UserCredentials = {
   userId: string;
   sessionToken: string;
   refreshToken: string;
@@ -148,8 +148,8 @@ export interface AuthClientConfig {
   userId: string;
   /** Initial session token from worker middleware */
   sessionToken: string;
-  /** Optional callback when state changes */
-  onStateChange?: (state: AuthState) => void;
+  /** Optional refresh token, recommended for mobile clients */
+  refreshToken?: string;
   /** Optional callback for handling errors */
   onError?: (error: Error) => void;
 }
