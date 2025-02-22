@@ -245,8 +245,12 @@ export async function initializeAuth() {
     });
   }
 
-  // Otherwise create a new anonymous user
-  const tokens = await createAnonymousUser("your-worker.workers.dev");
+  // Otherwise create a new anonymous user with longer refresh token for mobile
+  const tokens = await createAnonymousUser({
+    host: "your-worker.workers.dev",
+    refreshTokenExpiresIn: '30d', // Longer refresh token for mobile
+    sessionTokenExpiresIn: '1h'   // Longer session token for mobile
+  });
   
   // Store the tokens
   await Promise.all([
@@ -259,7 +263,8 @@ export async function initializeAuth() {
   return createAuthClient({
     host: "your-worker.workers.dev",
     userId: tokens.userId,
-    sessionToken: tokens.sessionToken
+    sessionToken: tokens.sessionToken,
+    refreshToken: tokens.refreshToken // Include refresh token for mobile
   });
 }
 
@@ -378,14 +383,18 @@ Auth Kit is comprised of three core components:
 
 ### 🔐 auth-kit/client
 
-`createAnonymousUser(host: string): Promise<AuthTokens>`
+`createAnonymousUser(config: AnonymousUserConfig): Promise<UserCredentials>`
 
 Creates a new anonymous user and returns their tokens. This is a standalone function that should be used before creating the auth client, particularly useful for mobile clients or when you need explicit control over user creation.
 
 Example:
 ```typescript
 // First create an anonymous user
-const { userId, sessionToken, refreshToken } = await createAnonymousUser('localhost:8787');
+const { userId, sessionToken, refreshToken } = await createAnonymousUser({
+  host: 'localhost:8787',
+  refreshTokenExpiresIn: '30d', // Optional: customize refresh token expiration (default: '7d')
+  sessionTokenExpiresIn: '1h',  // Optional: customize session token expiration (default: '15m')
+});
 
 // Then create the client with the tokens
 const client = createAuthClient({
@@ -393,6 +402,18 @@ const client = createAuthClient({
   userId,
   sessionToken
 });
+```
+
+Type definitions:
+```typescript
+interface AnonymousUserConfig {
+  /** Host without protocol (e.g. "localhost:8787") */
+  host: string;
+  /** JWT expiration time for refresh tokens (default: '7d') */
+  refreshTokenExpiresIn?: string;
+  /** JWT expiration time for session tokens (default: '15m') */
+  sessionTokenExpiresIn?: string;
+}
 ```
 
 `createAuthClient(config)`

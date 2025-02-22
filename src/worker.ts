@@ -12,23 +12,25 @@ interface TokenPayload {
 
 async function createSessionToken(
   userId: string,
-  secret: string
+  secret: string,
+  expiresIn: string = "15m"
 ): Promise<string> {
   const sessionId = crypto.randomUUID();
   return await new SignJWT({ userId, sessionId })
     .setProtectedHeader({ alg: "HS256" })
     .setAudience("SESSION")
-    .setExpirationTime("15m")
+    .setExpirationTime(expiresIn)
     .sign(new TextEncoder().encode(secret));
 }
 
 async function createRefreshToken(
   userId: string,
-  secret: string
+  secret: string,
+  expiresIn: string = "7d"
 ): Promise<string> {
   return await new SignJWT({ userId })
     .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("7d")
+    .setExpirationTime(expiresIn)
     .setAudience("REFRESH")
     .sign(new TextEncoder().encode(secret));
 }
@@ -119,6 +121,12 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
     try {
       switch (route) {
         case "anonymous": {
+          // Parse request body for token expiration times
+          const { refreshTokenExpiresIn, sessionTokenExpiresIn } = await request.json() as {
+            refreshTokenExpiresIn?: string;
+            sessionTokenExpiresIn?: string;
+          };
+
           // Generate a new user ID
           const userId = crypto.randomUUID();
 
@@ -127,9 +135,17 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
             await hooks.onNewUser({ userId, env, request });
           }
 
-          // Generate new session and refresh tokens
-          const sessionToken = await createSessionToken(userId, env.AUTH_SECRET);
-          const refreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
+          // Generate new session and refresh tokens with custom expiration times
+          const sessionToken = await createSessionToken(
+            userId, 
+            env.AUTH_SECRET,
+            sessionTokenExpiresIn
+          );
+          const refreshToken = await createRefreshToken(
+            userId, 
+            env.AUTH_SECRET,
+            refreshTokenExpiresIn
+          );
 
           return new Response(
             JSON.stringify({

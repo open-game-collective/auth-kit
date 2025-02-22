@@ -153,3 +153,12 @@ export interface AuthClientConfig {
   /** Optional callback for handling errors */
   onError?: (error: Error) => void;
 }
+
+export interface AnonymousUserConfig {
+  /** Host without protocol (e.g. "localhost:8787") */
+  host: string;
+  /** JWT expiration time for refresh tokens (default: '7d') */
+  refreshTokenExpiresIn?: string;
+  /** JWT expiration time for session tokens (default: '15m') */
+  sessionTokenExpiresIn?: string;
+}

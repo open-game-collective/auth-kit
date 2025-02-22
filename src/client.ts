@@ -1,16 +1,20 @@
-import type { AuthState, UserCredentials, AuthClient, AuthClientConfig } from "./types";
+import type { AuthState, UserCredentials, AuthClient, AuthClientConfig, AnonymousUserConfig } from "./types";
 
-export async function createAnonymousUser(host: string): Promise<UserCredentials> {
+export async function createAnonymousUser(config: AnonymousUserConfig): Promise<UserCredentials> {
   // Add protocol if not present
-  const apiHost = host.startsWith('http://') || host.startsWith('https://')
-    ? host
-    : `http://${host}`;
+  const apiHost = config.host.startsWith('http://') || config.host.startsWith('https://')
+    ? config.host
+    : `http://${config.host}`;
 
   const response = await fetch(`${apiHost}/auth/anonymous`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
-    }
+    },
+    body: JSON.stringify({
+      refreshTokenExpiresIn: config.refreshTokenExpiresIn,
+      sessionTokenExpiresIn: config.sessionTokenExpiresIn
+    })
   });
 
   if (!response.ok) {

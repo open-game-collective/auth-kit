@@ -26,7 +26,38 @@ describe('createAnonymousUser', () => {
       })
     );
 
-    const result = await createAnonymousUser('localhost:8787');
+    const result = await createAnonymousUser({
+      host: 'localhost:8787'
+    });
+
+    expect(result).toEqual({
+      userId: 'anon-123',
+      sessionToken: 'session-token-123',
+      refreshToken: 'refresh-token-123'
+    });
+  });
+
+  it('should create an anonymous user with custom token expiration', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/anonymous', async ({ request }) => {
+        const body = await request.json();
+        expect(body).toEqual({
+          refreshTokenExpiresIn: '30d',
+          sessionTokenExpiresIn: '1h'
+        });
+        return HttpResponse.json({
+          userId: 'anon-123',
+          sessionToken: 'session-token-123',
+          refreshToken: 'refresh-token-123'
+        });
+      })
+    );
+
+    const result = await createAnonymousUser({
+      host: 'localhost:8787',
+      refreshTokenExpiresIn: '30d',
+      sessionTokenExpiresIn: '1h'
+    });
 
     expect(result).toEqual({
       userId: 'anon-123',
@@ -42,7 +73,9 @@ describe('createAnonymousUser', () => {
       })
     );
 
-    await expect(createAnonymousUser('localhost:8787')).rejects.toThrow();
+    await expect(createAnonymousUser({
+      host: 'localhost:8787'
+    })).rejects.toThrow();
   });
 });
 
