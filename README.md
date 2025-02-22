@@ -8,7 +8,7 @@ A full-stack authentication toolkit for React applications built on Cloudflare W
 - [Key Features](#key-features)
 - [Usage Guide](#usage-guide)
   - [1️⃣ Set up Environment and Worker](#1️⃣-set-up-environment-and-worker)
-  - [2️⃣ Access Auth in Remix Routes](#2️⃣-access-auth-in-remix-routes)
+  - [2️⃣ Access Auth in React Router Routes](#2️⃣-access-auth-in-react-router-routes)
   - [3️⃣ Configure Worker](#3️⃣-configure-worker)
   - [4️⃣ Set up Auth Client and React Integration](#4️⃣-set-up-auth-client-and-react-integration)
 - [Architecture](#architecture)
@@ -19,11 +19,11 @@ A full-stack authentication toolkit for React applications built on Cloudflare W
 ## Installation
 
 ```bash
-npm install auth-kit
+npm install @open-game-collective/auth-kit
 # or
-yarn add auth-kit
+yarn add @open-game-collective/auth-kit
 # or
-pnpm add auth-kit
+pnpm add @open-game-collective/auth-kit
 ```
 
 ## Key Features
@@ -210,7 +210,7 @@ Auth Kit is comprised of three core components:
    - Handles all `/auth/*` routes automatically.
    - Manages JWT-based session tokens (15 minutes) and refresh tokens (7 days).
    - Creates anonymous users when no valid session exists.
-   - Supplies `userId` and `sessionId` to your Remix loaders.
+   - Supplies `userId` and `sessionId` to your React Router loaders.
 
 2. **Auth Client (`auth-kit/client`)**
    - Manages client-side auth state.
