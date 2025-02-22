@@ -1,5 +1,26 @@
 import type { AuthState, AuthTokens, AuthClient, AuthClientConfig } from "./types";
 
+export async function createAnonymousUser(host: string): Promise<AuthTokens> {
+  // Add protocol if not present
+  const apiHost = host.startsWith('http://') || host.startsWith('https://')
+    ? host
+    : `http://${host}`;
+
+  const response = await fetch(`${apiHost}/auth/anonymous`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(error);
+  }
+
+  return response.json();
+}
+
 export function createAuthClient(config: AuthClientConfig): AuthClient {
   let state: AuthState = {
     isLoading: false,

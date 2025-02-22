@@ -60,34 +60,25 @@ async function verifyToken(
 }
 
 function getCookie(request: Request, name: string): string | undefined {
-  console.log('Debug - getCookie called with name:', name);
-  
   // Try both lowercase and uppercase cookie header
   const cookieHeader = request.headers.get("cookie");
-  console.log('Debug - Cookie header (lowercase):', cookieHeader);
   
   if (!cookieHeader) {
-    console.log('Debug - No cookie header found');
     return undefined;
   }
   
   // Split and trim cookies
   const cookies = cookieHeader.split(";").map(cookie => cookie.trim());
-  console.log('Debug - Parsed cookies:', cookies);
   
   // Find the specific cookie
   const cookie = cookies.find(cookie => cookie.startsWith(`${name}=`));
-  console.log('Debug - Found cookie:', cookie);
   
   if (!cookie) {
-    console.log('Debug - Cookie not found');
     return undefined;
   }
   
   // Extract and decode the value
-  const value = decodeURIComponent(cookie.split("=")[1]);
-  console.log('Debug - Cookie value:', value);
-  return value;
+  return decodeURIComponent(cookie.split("=")[1]);
 }
 
 function generateVerificationCode(): string {
@@ -127,6 +118,31 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
 
     try {
       switch (route) {
+        case "anonymous": {
+          // Generate a new user ID
+          const userId = crypto.randomUUID();
+
+          // Call onNewUser hook if provided
+          if (hooks.onNewUser) {
+            await hooks.onNewUser({ userId, env, request });
+          }
+
+          // Generate new session and refresh tokens
+          const sessionToken = await createSessionToken(userId, env.AUTH_SECRET);
+          const refreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
+
+          return new Response(
+            JSON.stringify({
+              userId,
+              sessionToken,
+              refreshToken,
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
+
         case "verify": {
           const { email, code } = (await request.json()) as {
             email: string;
@@ -232,21 +248,16 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
 
         case "refresh": {
           const authHeader = request.headers.get("Authorization");
-          console.log("Auth header:", authHeader);
 
           if (!authHeader?.startsWith("Bearer ")) {
-            console.log("No Bearer token found");
             return new Response("No refresh token provided", { status: 401 });
           }
 
           const refreshToken = authHeader.slice(7); // Remove 'Bearer ' prefix
-          console.log("Refresh token:", refreshToken);
 
           const payload = await verifyToken(refreshToken, env.AUTH_SECRET);
-          console.log("Verify token result:", payload);
 
           if (!payload) {
-            console.log("Invalid token payload");
             return new Response("Invalid refresh token", { status: 401 });
           }
 
@@ -258,10 +269,6 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
             payload.userId,
             env.AUTH_SECRET
           );
-          console.log("New tokens generated:", {
-            newSessionToken,
-            newRefreshToken,
-          });
 
           return new Response(
             JSON.stringify({
@@ -292,7 +299,6 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           return new Response("Not found", { status: 404 });
       }
     } catch (error) {
-      console.error("Auth router error:", error);
       return new Response(JSON.stringify({ error: "Internal server error" }), { 
         status: 500,
         headers: { "Content-Type": "application/json" }
@@ -321,11 +327,8 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
       return router(request, env);
     }
 
-    console.log('Debug - Headers:', [...request.headers.entries()]);
     const sessionToken = getCookie(request, SESSION_TOKEN_COOKIE);
-    console.log('Debug - Session token from cookie:', sessionToken);
     const refreshToken = getCookie(request, REFRESH_TOKEN_COOKIE);
-    console.log('Debug - Refresh token from cookie:', refreshToken);
 
     let userId: string;
     let sessionId: string;
@@ -335,15 +338,12 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
 
     // First try to verify the session token
     if (sessionToken) {
-      console.log('Debug - Verifying session token');
       const payload = await verifyToken(sessionToken, env.AUTH_SECRET);
-      console.log('Debug - Session token verification result:', payload);
       if (payload && payload.aud === 'SESSION') {
         // Valid session token
         userId = payload.userId;
         sessionId = payload.sessionId || crypto.randomUUID();
         currentSessionToken = sessionToken;
-        console.log('Debug - Using existing session:', { userId, sessionId });
       } else if (refreshToken) {
         // Invalid session token but has refresh token
         const refreshPayload = await verifyToken(refreshToken, env.AUTH_SECRET);

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createAuthClient } from './client';
+import { createAuthClient, createAnonymousUser } from './client';
 import { http, HttpResponse } from 'msw';
 import { server } from './test/setup';
 
@@ -9,6 +9,42 @@ declare global {
     location: Location;
   }
 }
+
+describe('createAnonymousUser', () => {
+  beforeEach(() => {
+    server.resetHandlers();
+  });
+
+  it('should create an anonymous user', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/anonymous', () => {
+        return HttpResponse.json({
+          userId: 'anon-123',
+          sessionToken: 'session-token-123',
+          refreshToken: 'refresh-token-123'
+        });
+      })
+    );
+
+    const result = await createAnonymousUser('localhost:8787');
+
+    expect(result).toEqual({
+      userId: 'anon-123',
+      sessionToken: 'session-token-123',
+      refreshToken: 'refresh-token-123'
+    });
+  });
+
+  it('should handle errors when creating anonymous user', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/anonymous', () => {
+        return new HttpResponse('Server error', { status: 500 });
+      })
+    );
+
+    await expect(createAnonymousUser('localhost:8787')).rejects.toThrow();
+  });
+});
 
 describe('AuthClient', () => {
   beforeEach(() => {
