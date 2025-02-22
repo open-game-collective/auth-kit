@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
-import { createAuthRouter, withAuth } from './worker';
+import { createAuthRouter, withAuth } from './server';
 import { http, HttpResponse } from 'msw';
 import { server } from './test/setup';
 

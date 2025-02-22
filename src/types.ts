@@ -144,9 +144,9 @@ export interface AuthClient {
 export interface AuthClientConfig {
   /** Host without protocol (e.g. "localhost:8787") */
   host: string;
-  /** Initial user ID from worker middleware */
+  /** Initial user ID from server middleware */
   userId: string;
-  /** Initial session token from worker middleware */
+  /** Initial session token from server middleware */
   sessionToken: string;
   /** Optional refresh token, recommended for mobile clients */
   refreshToken?: string;

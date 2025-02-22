@@ -181,7 +181,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     },
     async refresh() {
       if (!state.refreshToken) {
-        throw new Error("No refresh token available. For web applications, token refresh is handled by the worker middleware.");
+        throw new Error("No refresh token available. For web applications, token refresh is handled by the server middleware.");
       }
 
       setLoading(true);

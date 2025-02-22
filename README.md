@@ -7,9 +7,9 @@ A headless, isomorphic authentication toolkit that runs seamlessly across server
 - [Installation](#installation)
 - [Key Features](#key-features)
 - [Usage Guide](#usage-guide)
-  - [1️⃣ Set up Environment and Worker](#1️⃣-set-up-environment-and-worker)
+  - [1️⃣ Set up Environment and Server](#1️⃣-set-up-environment-and-server)
   - [2️⃣ Access Auth in React Router Routes](#2️⃣-access-auth-in-react-router-routes)
-  - [3️⃣ Configure Worker](#3️⃣-configure-worker)
+  - [3️⃣ Configure Server](#3️⃣-configure-server)
   - [4️⃣ Set up Auth Client and React Integration](#4️⃣-set-up-auth-client-and-react-integration)
 - [Architecture](#architecture)
 - [API Reference](#api-reference)
@@ -41,13 +41,13 @@ pnpm add @open-game-collective/auth-kit
 
 ## Usage Guide
 
-### Web Applications (with Remix and Cloudflare Workers)
+### Web Applications
 
-For web applications using Remix and Cloudflare Workers, here's how to set up authentication:
+Auth Kit is directly compatible with all major React server frameworks including Next.js, Remix, React Router, TanStack Router, Vite, and more. While this example uses Remix and Cloudflare Workers, the library works seamlessly with any server-side React setup:
 
 ```typescript
-// app/worker.ts
-import { AuthHooks, withAuth } from "@open-game-collective/auth-kit/worker";
+// app/server.ts
+import { AuthHooks, withAuth } from "@open-game-collective/auth-kit/server";
 import { createRequestHandler, logDevReady } from "@remix-run/cloudflare";
 import * as build from "@remix-run/dev/server-build";
 import { Env } from "./env";
@@ -203,9 +203,17 @@ export default function App() {
 ```
 
 The setup above demonstrates:
-1. Worker setup with auth hooks for KV storage and email verification
+1. Server setup with auth hooks for KV storage and email verification (can be adapted for any storage solution)
 2. Root component that initializes the auth client with user context from the loader
-3. Integration with Remix's loader data and context providers
+3. Integration with server-side data loading
+
+You can use Auth Kit with:
+- Next.js: In API routes or server components
+- React Router: In loaders or actions
+- TanStack Router: In route handlers
+- Vite SSR: In server entry point
+
+The only requirement is implementing the auth hooks for your chosen storage and email delivery solutions.
 
 ### Mobile Applications (React Native)
 
@@ -364,7 +372,7 @@ The key differences between web and mobile implementations:
 
 Auth Kit is comprised of three core components:
 
-1. **Worker Middleware (`@open-game-collective/auth-kit/worker`)**
+1. **Server Middleware (`@open-game-collective/auth-kit/server`)**
    - Handles all `/auth/*` routes automatically.
    - Manages JWT-based session tokens (15 minutes) and refresh tokens (7 days).
    - Creates anonymous users when no valid session exists.
@@ -443,14 +451,14 @@ const client = createAuthClient({
 The client provides methods for managing authentication:
 - `requestCode(email)`: Initiates the email verification process.
 - `verifyEmail(email, code)`: Verifies the user's email with the provided code.
-- `logout()`: Logs out the current user and clears the session. For web apps, the worker middleware will automatically create a new anonymous session. For mobile apps, you'll need to handle token cleanup and client state reset manually.
+- `logout()`: Logs out the current user and clears the session. For web apps, the middleware will automatically create a new anonymous session. For mobile apps, you'll need to handle token cleanup and client state reset manually.
 - `refresh()`: Refreshes the session token. Only works if a refresh token was provided during initialization.
 
-### 🖥️ @open-game-collective/auth-kit/worker
+### 🖥️ @open-game-collective/auth-kit/server
 
 `withAuth<TEnv>(handler, config)`
 
-A middleware that handles authentication and supplies user context to your worker functions. It manages:
+A middleware that handles authentication and supplies user context to your server functions. It manages:
 - Automatic anonymous user creation.
 - JWT-based session and refresh tokens.
 - Secure, HTTP-only cookie handling.
@@ -971,7 +979,7 @@ function LogoutButton() {
 
   const handleLogout = async () => {
     await client.logout();
-    // For web apps, the worker middleware will clear the cookies
+    // For web apps, the middleware will clear the cookies
     // and create a new anonymous session automatically
     navigate('/');
   };
