@@ -543,6 +543,7 @@ it('handles email verification flow', async () => {
   
   expect(screen.getByText('Email verified!')).toBeInTheDocument();
 });
+```
 
 The mock client provides additional testing utilities:
 
