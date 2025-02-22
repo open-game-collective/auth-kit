@@ -1,6 +1,6 @@
 # 🔐 Auth Kit
 
-A headless, isomorphic authentication toolkit that runs seamlessly across server-side, web, and React Native environments. Built on Cloudflare Workers, Auth Kit provides a secure, low-latency authentication system with email verification and token management. Perfect for applications that need a robust, platform-agnostic auth system with a great developer experience.
+A headless, isomorphic authentication toolkit that runs seamlessly across server-side, web, and React Native environments. Auth Kit provides a secure, low-latency authentication system with email verification and token management. Perfect for applications that need a robust, platform-agnostic auth system with a great developer experience.
 
 ## Table of Contents
 
