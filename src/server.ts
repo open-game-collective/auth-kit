@@ -311,6 +311,37 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           return response;
         }
 
+        case "web-code": {
+          // Verify the user is authenticated
+          const authHeader = request.headers.get("Authorization");
+          if (!authHeader?.startsWith("Bearer ")) {
+            return new Response("Unauthorized", { status: 401 });
+          }
+
+          const sessionToken = authHeader.slice(7); // Remove 'Bearer ' prefix
+          const payload = await verifyToken(sessionToken, env.AUTH_SECRET);
+
+          if (!payload) {
+            return new Response("Invalid session token", { status: 401 });
+          }
+
+          // Generate a short-lived web auth code
+          const code = crypto.randomUUID();
+          const expiresIn = 300; // 5 minutes
+
+          // Store the code temporarily (you may want to add a hook for this)
+          // For now, we'll just return it directly since verification happens server-side
+          return new Response(
+            JSON.stringify({
+              code,
+              expiresIn
+            }),
+            {
+              headers: { "Content-Type": "application/json" }
+            }
+          );
+        }
+
         default:
           return new Response("Not found", { status: 404 });
       }

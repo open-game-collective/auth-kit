@@ -67,15 +67,16 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     });
   }
 
-  async function post<T>(path: string, body?: object): Promise<T> {
+  async function post<T>(path: string, body?: object, headers?: Record<string, string>): Promise<T> {
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
+      const combinedHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...headers
       };
       
       // Add Authorization header for refresh token if available
       if (path === 'refresh' && state.refreshToken) {
-        headers['Authorization'] = `Bearer ${state.refreshToken}`;
+        combinedHeaders['Authorization'] = `Bearer ${state.refreshToken}`;
       }
 
       // Add protocol if not present
@@ -85,7 +86,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
 
       const response = await fetch(`${host}/auth/${path}`, {
         method: 'POST',
-        headers,
+        headers: combinedHeaders,
         body: body ? JSON.stringify(body) : undefined
       });
 
@@ -195,6 +196,20 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
         });
       } catch (error) {
         setError(error instanceof Error ? error.message : 'Failed to refresh token');
+        throw error;
+      } finally {
+        setLoading(false);
+      }
+    },
+    async getWebAuthCode() {
+      setLoading(true);
+      try {
+        const response = await post<{ code: string; expiresIn: number }>('web-code', undefined, {
+          Authorization: `Bearer ${state.sessionToken}`
+        });
+        return response;
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'Failed to get web auth code');
         throw error;
       } finally {
         setLoading(false);

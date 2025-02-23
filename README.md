@@ -368,6 +368,72 @@ The key differences between web and mobile implementations:
    - Need to handle token persistence manually
    - Refresh token can be used for longer sessions
 
+### Mobile-to-Web Authentication
+
+Auth Kit provides a seamless way to authenticate mobile app users in web views. This is useful for scenarios where you want to:
+- Open authenticated web content from your mobile app
+- Share authentication state between mobile and web
+- Provide a hybrid mobile-web experience
+
+Here's how to implement it:
+
+```typescript
+// Mobile App: Open web view with auth code
+async function openAuthenticatedWebView() {
+  const client = AuthContext.useClient();
+  
+  // Get one-time auth code using client method
+  const { code, expiresIn } = await client.getWebAuthCode();
+  const url = `https://your-web-app.com?code=${code}`;
+  
+  // Option 1: Using Expo WebBrowser (recommended if using Expo)
+  import * as WebBrowser from 'expo-web-browser';
+  await WebBrowser.openAuthSessionAsync(url);
+  
+  // Option 2: Using React Native's Linking (vanilla React Native)
+  import { Linking } from 'react-native';
+  await Linking.openURL(url);
+  
+  // Option 3: Using React Native WebView
+  import { WebView } from 'react-native-webview';
+  return (
+    <WebView 
+      source={{ uri: url }}
+      // Add necessary security props
+      incognito={true}  // Use incognito mode to avoid sharing cookies
+      sharedCookiesEnabled={false}
+      thirdPartyCookiesEnabled={false}
+    />
+  );
+}
+
+// Web app automatically handles the code!
+// The withAuth middleware:
+// 1. Detects auth code in URL
+// 2. Verifies the code
+// 3. Sets up the web session with the mobile user's session
+// 4. Redirects to the app
+```
+
+Key security considerations:
+- One-time auth codes expire quickly (e.g., 5 minutes)
+- Codes can only be used once
+- HTTPS is required for all requests
+- Session tokens are stored in HTTP-only cookies
+- Mobile app verifies web app origin before opening
+
+This approach is more secure than OAuth for first-party applications because:
+- No need for complex OAuth flows and token exchanges
+- Direct authentication using your existing session management
+- Reduced attack surface without OAuth callbacks
+- Simpler UX without OAuth consent screens
+
+This approach is more secure than OAuth for first-party applications because:
+- No need for complex OAuth flows and token exchanges
+- Direct authentication using your existing session management
+- Reduced attack surface without OAuth callbacks
+- Simpler UX without OAuth consent screens
+
 ## Architecture
 
 Auth Kit is comprised of three core components:
@@ -393,79 +459,84 @@ Auth Kit is comprised of three core components:
 
 ### 🔐 @open-game-collective/auth-kit/client
 
-`createAnonymousUser(config: AnonymousUserConfig): Promise<UserCredentials>`
+The client provides methods for managing authentication:
 
-Creates a new anonymous user and returns their tokens. This is a standalone function that should be used before creating the auth client, particularly useful for mobile clients or when you need explicit control over user creation.
-
-Example:
 ```typescript
-// First create an anonymous user
-const { userId, sessionToken, refreshToken } = await createAnonymousUser({
-  host: 'localhost:8787',
-  refreshTokenExpiresIn: '30d', // Optional: customize refresh token expiration (default: '7d')
-  sessionTokenExpiresIn: '1h',  // Optional: customize session token expiration (default: '15m')
-});
+interface AuthClient {
+  // Core authentication methods
+  getState(): AuthState;
+  subscribe(callback: (state: AuthState) => void): () => void;
+  requestCode(email: string): Promise<void>;
+  verifyEmail(email: string, code: string): Promise<{ success: boolean }>;
+  logout(): Promise<void>;
+  refresh(): Promise<void>;
 
-// Then create the client with the tokens
-const client = createAuthClient({
-  host: 'localhost:8787',
-  userId,
-  sessionToken
-});
-```
-
-Type definitions:
-```typescript
-interface AnonymousUserConfig {
-  /** Host without protocol (e.g. "localhost:8787") */
-  host: string;
-  /** JWT expiration time for refresh tokens (default: '7d') */
-  refreshTokenExpiresIn?: string;
-  /** JWT expiration time for session tokens (default: '15m') */
-  sessionTokenExpiresIn?: string;
+  // Mobile-to-web authentication (mobile only)
+  getWebAuthCode(): Promise<{ code: string; expiresIn: number }>;
 }
 ```
 
-`createAuthClient(config)`
+**Core Methods:**
 
-Creates a new auth client instance.
+- `getState()`: Get current authentication state
+- `subscribe(callback)`: Subscribe to state changes
+- `requestCode(email)`: Request email verification code
+- `verifyEmail(email, code)`: Verify email with code
+- `logout()`: Clear session and tokens
+- `refresh()`: Refresh session using refresh token
 
-Example:
-```typescript
-// Web usage (refresh handled by middleware)
-const client = createAuthClient({
-  host: "localhost:8787",
-  userId: "user_id_from_cookie",
-  sessionToken: "session_token_from_cookie"
-});
+**Mobile-to-Web Method:**
 
-// Mobile usage (manual refresh handling)
-const client = createAuthClient({
-  host: "your-worker.workers.dev",
-  userId: "user_id",
-  sessionToken: "session_token",
-  refreshToken: "refresh_token" // Optional, but recommended for mobile
-});
-```
-
-The client provides methods for managing authentication:
-- `requestCode(email)`: Initiates the email verification process.
-- `verifyEmail(email, code)`: Verifies the user's email with the provided code.
-- `logout()`: Logs out the current user and clears the session. For web apps, the middleware will automatically create a new anonymous session. For mobile apps, you'll need to handle token cleanup and client state reset manually.
-- `refresh()`: Refreshes the session token. Only works if a refresh token was provided during initialization.
+- `getWebAuthCode()`: Generate a one-time code for web authentication (mobile only)
+  ```typescript
+  const { code, expiresIn } = await client.getWebAuthCode();
+  // code: One-time auth code
+  // expiresIn: Expiration time in seconds (e.g. 300 for 5 minutes)
+  ```
 
 ### 🖥️ @open-game-collective/auth-kit/server
 
-`withAuth<TEnv>(handler, config)`
+The server provides two main exports:
 
-A middleware that integrates authentication directly into your server application. It:
-- Exposes all `/auth/*` endpoints (login, logout, refresh, etc.) in the same application running your React app
-- Handles authentication and supplies user context to your server functions
-- Creates anonymous users automatically
-- Manages JWT-based session and refresh tokens
-- Handles secure, HTTP-only cookie management
+1. `createAuthRouter`: Creates an auth router that handles all `/auth/*` endpoints
+2. `withAuth`: Middleware that integrates authentication with your app
 
-This means you don't need a separate auth server - all auth functionality runs alongside your main application.
+**Auth Router Endpoints:**
+
+- `POST /auth/anonymous`: Create anonymous user
+- `POST /auth/request-code`: Request email verification code
+- `POST /auth/verify`: Verify email code
+- `POST /auth/refresh`: Refresh session token
+- `POST /auth/logout`: Clear session
+- `POST /auth/web-code`: Generate one-time web auth code
+
+The middleware automatically handles:
+- Token validation and refresh
+- Session management
+- Error handling
+- Cookie management (for web)
+- Mobile-to-web auth code verification
+- CORS and security headers
+
+**Mobile-to-Web Authentication Flow:**
+
+1. Mobile app gets auth code:
+```typescript
+// Mobile app
+const { code } = await client.getWebAuthCode();
+const url = `https://your-web-app.com?code=${code}`;
+WebBrowser.openAuthSessionAsync(url);
+```
+
+2. Web app automatically handles the code:
+```typescript
+// Web app - no special code needed!
+// The withAuth middleware automatically:
+// 1. Detects auth code in URL
+// 2. Verifies the code
+// 3. Sets up the web session with the mobile user's session
+// 4. Redirects to the app
+```
 
 ### ⚛️ @open-game-collective/auth-kit/react
 

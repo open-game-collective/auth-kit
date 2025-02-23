@@ -131,7 +131,6 @@ export type AuthHooks<TEnv = any> = {
     request: Request;
   }) => Promise<void>;
 };
-
 export interface AuthClient {
   getState(): AuthState;
   subscribe(callback: (state: AuthState) => void): () => void;
@@ -139,6 +138,9 @@ export interface AuthClient {
   verifyEmail(email: string, code: string): Promise<{ success: boolean }>;
   logout(): Promise<void>;
   refresh(): Promise<void>;
+  
+  // Mobile-to-web authentication (mobile only)
+  getWebAuthCode(): Promise<{ code: string; expiresIn: number }>;
 }
 
 export interface AuthClientConfig {
@@ -162,3 +164,4 @@ export interface AnonymousUserConfig {
   /** JWT expiration time for session tokens (default: '15m') */
   sessionTokenExpiresIn?: string;
 }
+

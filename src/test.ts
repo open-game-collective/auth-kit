@@ -66,6 +66,19 @@ export function createAuthMockClient(config: {
         error: undefined
       });
     }),
+    getWebAuthCode: vi.fn(async () => {
+      setState({ isLoading: true });
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 0));
+      setState({
+        isLoading: false,
+        error: undefined
+      });
+      return {
+        code: 'test-web-code',
+        expiresIn: 300
+      };
+    }),
     setState
   };
 

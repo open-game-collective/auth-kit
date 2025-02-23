@@ -308,6 +308,62 @@ describe('Auth Router', () => {
     const response = await router(request, mockEnv);
     expect(response.status).toBe(404);
   });
+
+  describe('Web Auth Code', () => {
+    it('should generate web auth code with valid session token', async () => {
+      const request = new Request('http://localhost/auth/web-code', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer valid-session-token'
+        }
+      });
+
+      const response = await router(request, mockEnv);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data).toEqual({
+        code: expect.any(String),
+        expiresIn: 300
+      });
+    });
+
+    it('should reject web auth code request without Authorization header', async () => {
+      const request = new Request('http://localhost/auth/web-code', {
+        method: 'POST'
+      });
+
+      const response = await router(request, mockEnv);
+      expect(response.status).toBe(401);
+      expect(await response.text()).toBe('Unauthorized');
+    });
+
+    it('should reject web auth code request with invalid session token', async () => {
+      const request = new Request('http://localhost/auth/web-code', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer invalid-token'
+        }
+      });
+
+      const response = await router(request, mockEnv);
+      expect(response.status).toBe(401);
+      expect(await response.text()).toBe('Invalid session token');
+    });
+
+    it('should reject web auth code request with malformed Authorization header', async () => {
+      const request = new Request('http://localhost/auth/web-code', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'invalid-format'
+        }
+      });
+
+      const response = await router(request, mockEnv);
+      expect(response.status).toBe(401);
+      expect(await response.text()).toBe('Unauthorized');
+    });
+  });
 });
 
 describe('Auth Middleware', () => {

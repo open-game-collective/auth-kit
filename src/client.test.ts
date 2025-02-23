@@ -329,4 +329,49 @@ describe('AuthClient', () => {
 
     expect(client.getState().sessionToken).toBe('refreshed-session-token');
   });
+});
+
+describe('Mobile-to-Web Authentication', () => {
+  beforeEach(() => {
+    server.resetHandlers();
+  });
+
+  it('should generate web auth code', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/web-code', () => {
+        return HttpResponse.json({
+          code: 'test-web-code',
+          expiresIn: 300
+        });
+      })
+    );
+
+    const client = createAuthClient({
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
+    });
+
+    const result = await client.getWebAuthCode();
+    expect(result).toEqual({
+      code: 'test-web-code',
+      expiresIn: 300
+    });
+  });
+
+  it('should handle web auth code errors', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/web-code', () => {
+        return new HttpResponse('Unauthorized', { status: 401 });
+      })
+    );
+
+    const client = createAuthClient({
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
+    });
+
+    await expect(client.getWebAuthCode()).rejects.toThrow('Unauthorized');
+  });
 }); 
