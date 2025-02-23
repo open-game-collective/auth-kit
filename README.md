@@ -370,69 +370,114 @@ The key differences between web and mobile implementations:
 
 ### Mobile-to-Web Authentication
 
-Auth Kit provides a seamless way to authenticate mobile app users in web views. This is useful for scenarios where you want to:
+Auth Kit provides a secure way to authenticate mobile app users in web views using signed JWTs. This is useful for scenarios where you want to:
 - Open authenticated web content from your mobile app
 - Share authentication state between mobile and web
 - Provide a hybrid mobile-web experience
 
-Here's how to implement it:
+Here's how the flow works:
 
+1. **Mobile App**: Generate a signed JWT auth code
+   ```typescript
+   // Mobile App: Request a signed JWT auth code
+   const { code, expiresIn } = await client.getWebAuthCode();
+   ```
+   The server:
+   - Verifies the mobile session token
+   - Creates a signed JWT containing the user's ID
+   - Sets a short expiration (5 minutes)
+   - Signs it with the same secret used for other tokens
+
+2. **Open Web View**: Use the JWT to authenticate
+   ```typescript
+   // Option 1: Using Expo WebBrowser
+   import * as WebBrowser from 'expo-web-browser';
+   await WebBrowser.openAuthSessionAsync(
+     `https://your-web-app.com?code=${code}`
+   );
+   
+   // Option 2: Using React Native's Linking
+   import { Linking } from 'react-native';
+   await Linking.openURL(
+     `https://your-web-app.com?code=${code}`
+   );
+   
+   // Option 3: Using React Native WebView
+   import { WebView } from 'react-native-webview';
+   return (
+     <WebView 
+       source={{ uri: `https://your-web-app.com?code=${code}` }}
+       // Security configuration
+       incognito={true}
+       sharedCookiesEnabled={false}
+       thirdPartyCookiesEnabled={false}
+     />
+   );
+   ```
+
+3. **Server Middleware**: Automatic JWT verification
+   The `withAuth` middleware automatically:
+   1. Detects the JWT auth code in the URL
+   2. Verifies the JWT signature and expiration
+   3. Extracts the user ID from the verified JWT
+   4. Creates new web session tokens with the same user ID
+   5. Sets HTTP-only cookies for the web session
+   6. Redirects to remove the code from URL
+
+Security features:
+- JWTs are cryptographically signed
+- Short expiration (5 minutes)
+- Audience claim verification ("WEB_AUTH")
+- No server-side storage needed
+- All communication requires HTTPS
+- Web sessions use HTTP-only cookies
+- Mobile app verifies web app origin
+- Session tokens are never exposed in URLs
+
+This approach is more secure than OAuth for first-party applications because:
+- No need for complex OAuth flows
+- Direct session transfer using signed JWTs
+- No server-side storage required
+- Reduced attack surface (no callback URLs)
+- Better UX (no consent screens)
+- Same user ID maintained across platforms
+
+Example JWT verification:
 ```typescript
-// Mobile App: Open web view with auth code
-async function openAuthenticatedWebView() {
-  const client = AuthContext.useClient();
-  
-  // Get one-time auth code using client method
-  const { code, expiresIn } = await client.getWebAuthCode();
-  const url = `https://your-web-app.com?code=${code}`;
-  
-  // Option 1: Using Expo WebBrowser (recommended if using Expo)
-  import * as WebBrowser from 'expo-web-browser';
-  await WebBrowser.openAuthSessionAsync(url);
-  
-  // Option 2: Using React Native's Linking (vanilla React Native)
-  import { Linking } from 'react-native';
-  await Linking.openURL(url);
-  
-  // Option 3: Using React Native WebView
-  import { WebView } from 'react-native-webview';
-  return (
-    <WebView 
-      source={{ uri: url }}
-      // Add necessary security props
-      incognito={true}  // Use incognito mode to avoid sharing cookies
-      sharedCookiesEnabled={false}
-      thirdPartyCookiesEnabled={false}
-    />
-  );
-}
+// Inside withAuth middleware
+const webAuthCode = url.searchParams.get('code');
+if (webAuthCode) {
+  try {
+    // Verify the JWT signature and claims
+    const verified = await jwtVerify(
+      webAuthCode, 
+      new TextEncoder().encode(env.AUTH_SECRET),
+      { audience: "WEB_AUTH" }
+    );
+    
+    const payload = verified.payload as { userId: string };
+    if (payload.userId) {
+      // Create new web session with same user ID
+      const sessionId = crypto.randomUUID();
+      const newSessionToken = await createSessionToken(
+        payload.userId, // Same user ID as mobile
+        env.AUTH_SECRET
+      );
+      const newRefreshToken = await createRefreshToken(
+        payload.userId,
+        env.AUTH_SECRET
+      );
 
-// Web app automatically handles the code!
-// The withAuth middleware:
-// 1. Detects auth code in URL
-// 2. Verifies the code
-// 3. Sets up the web session with the mobile user's session
-// 4. Redirects to the app
+      // Redirect and set cookies...
+    }
+  } catch (error) {
+    // JWT verification failed
+    console.error('Failed to verify web auth code:', error);
+  }
+}
 ```
 
-Key security considerations:
-- One-time auth codes expire quickly (e.g., 5 minutes)
-- Codes can only be used once
-- HTTPS is required for all requests
-- Session tokens are stored in HTTP-only cookies
-- Mobile app verifies web app origin before opening
-
-This approach is more secure than OAuth for first-party applications because:
-- No need for complex OAuth flows and token exchanges
-- Direct authentication using your existing session management
-- Reduced attack surface without OAuth callbacks
-- Simpler UX without OAuth consent screens
-
-This approach is more secure than OAuth for first-party applications because:
-- No need for complex OAuth flows and token exchanges
-- Direct authentication using your existing session management
-- Reduced attack surface without OAuth callbacks
-- Simpler UX without OAuth consent screens
+The web session maintains the same user identity as the mobile app while using its own session tokens, allowing for independent session management on each platform.
 
 ## Architecture
 

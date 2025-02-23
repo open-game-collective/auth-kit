@@ -55,82 +55,19 @@ export class APIError extends Error {
   }
 }
 
-export type AuthHooks<TEnv = any> = {
-  /**
-   * Required hook to look up a user ID by email address.
-   * This allows implementers to use their own storage mechanism for email-to-userId associations.
-   * @returns The user ID if found, null if no user exists with this email
-   */
-  getUserIdByEmail: (props: {
-    email: string;
-    env: TEnv;
-    request: Request;
-  }) => Promise<string | null>;
+export interface AuthHooks<TEnv> {
+  // Required hooks
+  getUserIdByEmail: (params: { email: string; env: TEnv; request: Request }) => Promise<string | null>;
+  storeVerificationCode: (params: { email: string; code: string; env: TEnv; request: Request }) => Promise<void>;
+  verifyVerificationCode: (params: { email: string; code: string; env: TEnv; request: Request }) => Promise<boolean>;
+  sendVerificationCode: (params: { email: string; code: string; env: TEnv; request: Request }) => Promise<boolean>;
 
-  /**
-   * Required hook to store a verification code for an email address.
-   * The code should expire after a short time (e.g., 10 minutes).
-   */
-  storeVerificationCode: (props: {
-    email: string;
-    code: string;
-    env: TEnv;
-    request: Request;
-  }) => Promise<void>;
+  // Optional hooks
+  onNewUser?: (params: { userId: string; env: TEnv; request: Request }) => Promise<void>;
+  onAuthenticate?: (params: { userId: string; email: string; env: TEnv; request: Request }) => Promise<void>;
+  onEmailVerified?: (params: { userId: string; email: string; env: TEnv; request: Request }) => Promise<void>;
+}
 
-  /**
-   * Required hook to verify if a code matches what was stored for an email.
-   * Should return false if the code is expired or doesn't match.
-   */
-  verifyVerificationCode: (props: {
-    email: string;
-    code: string;
-    env: TEnv;
-    request: Request;
-  }) => Promise<boolean>;
-
-  /**
-   * Required hook to send a verification code via email.
-   * @returns true if the email was sent successfully, false otherwise
-   */
-  sendVerificationCode: (props: {
-    email: string;
-    code: string;
-    env: TEnv;
-    request: Request;
-  }) => Promise<boolean>;
-
-  /**
-   * Called when a new anonymous user is created
-   */
-  onNewUser?: (props: {
-    userId: string;
-    env: TEnv;
-    request: Request;
-  }) => Promise<void>;
-
-  /**
-   * Called when a user successfully authenticates with their email code
-   */
-  onAuthenticate?: (props: {
-    userId: string;
-    email: string;
-    env: TEnv;
-    request: Request;
-  }) => Promise<void>;
-
-  /**
-   * Called when a user verifies their email address for the first time.
-   * This is typically used to mark a user as verified in your database
-   * or to perform any first-time setup for new users.
-   */
-  onEmailVerified?: (props: {
-    userId: string;
-    email: string;
-    env: TEnv;
-    request: Request;
-  }) => Promise<void>;
-};
 export interface AuthClient {
   getState(): AuthState;
   subscribe(callback: (state: AuthState) => void): () => void;

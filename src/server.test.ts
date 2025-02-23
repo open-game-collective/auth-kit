@@ -12,20 +12,27 @@ vi.stubGlobal('crypto', {
 vi.mock('jose', () => {
   const mockSign = () => Promise.resolve('new-session-token');
   const mockRefreshSign = () => Promise.resolve('new-refresh-token');
+  const mockWebAuthSign = () => Promise.resolve('test-web-code');
 
   const createMockJWT = (payload: Record<string, unknown>) => {
     const chain = {
       setProtectedHeader: () => chain,
-      setAudience: () => chain,
+      setAudience: (aud: string) => {
+        payload.aud = aud;
+        return chain;
+      },
       setExpirationTime: () => chain,
-      sign: () => payload.sessionId ? mockSign() : mockRefreshSign()
+      sign: () => {
+        if (payload.aud === 'WEB_AUTH') return mockWebAuthSign();
+        return payload.sessionId ? mockSign() : mockRefreshSign();
+      }
     };
     return chain;
   };
 
   return {
     SignJWT: vi.fn().mockImplementation(createMockJWT),
-    jwtVerify: vi.fn().mockImplementation(async (_token, _secret) => {
+    jwtVerify: vi.fn().mockImplementation(async (_token, _secret, options) => {
       if (_token === 'valid-session-token') {
         return {
           payload: { userId: 'test-user', sessionId: 'test-session', aud: 'SESSION' }
@@ -35,6 +42,11 @@ vi.mock('jose', () => {
         // For refresh tokens, we only need userId
         return {
           payload: { userId: 'test-user', aud: 'REFRESH' }
+        };
+      }
+      if (_token === 'test-web-code' && options?.audience === 'WEB_AUTH') {
+        return {
+          payload: { userId: 'mobile-user-123', sessionId: 'mobile-session-123', aud: 'WEB_AUTH' }
         };
       }
       if (_token === 'invalid-token') {
@@ -310,6 +322,28 @@ describe('Auth Router', () => {
   });
 
   describe('Web Auth Code', () => {
+    const baseHooks = {
+      onNewUser: vi.fn(),
+      onEmailVerified: vi.fn(),
+      onAuthenticate: vi.fn(),
+      getUserIdByEmail: vi.fn().mockImplementation(async ({ email }) => {
+        return email === 'test@example.com' ? 'test-user' : null;
+      }),
+      storeVerificationCode: vi.fn(),
+      verifyVerificationCode: vi.fn().mockImplementation(async ({ email, code }) => {
+        return email === 'test@example.com' && code === '123456';
+      }),
+      sendVerificationCode: vi.fn().mockResolvedValue(true)
+    };
+
+    const routerWithWebHooks = createAuthRouter({
+      hooks: baseHooks
+    });
+
+    beforeEach(() => {
+      Object.values(baseHooks).forEach(mock => mock.mockClear?.());
+    });
+
     it('should generate web auth code with valid session token', async () => {
       const request = new Request('http://localhost/auth/web-code', {
         method: 'POST',
@@ -318,12 +352,12 @@ describe('Auth Router', () => {
         }
       });
 
-      const response = await router(request, mockEnv);
+      const response = await routerWithWebHooks(request, mockEnv);
       const data = await response.json();
 
       expect(response.status).toBe(200);
       expect(data).toEqual({
-        code: expect.any(String),
+        code: 'test-web-code',
         expiresIn: 300
       });
     });
@@ -333,7 +367,7 @@ describe('Auth Router', () => {
         method: 'POST'
       });
 
-      const response = await router(request, mockEnv);
+      const response = await routerWithWebHooks(request, mockEnv);
       expect(response.status).toBe(401);
       expect(await response.text()).toBe('Unauthorized');
     });
@@ -346,7 +380,7 @@ describe('Auth Router', () => {
         }
       });
 
-      const response = await router(request, mockEnv);
+      const response = await routerWithWebHooks(request, mockEnv);
       expect(response.status).toBe(401);
       expect(await response.text()).toBe('Invalid session token');
     });
@@ -359,7 +393,7 @@ describe('Auth Router', () => {
         }
       });
 
-      const response = await router(request, mockEnv);
+      const response = await routerWithWebHooks(request, mockEnv);
       expect(response.status).toBe(401);
       expect(await response.text()).toBe('Unauthorized');
     });
@@ -490,6 +524,75 @@ describe('Auth Middleware', () => {
       userId: 'test-uuid',
       env: mockEnv,
       request
+    });
+  });
+
+  describe('Web Auth Code Handling', () => {
+    const baseHooks = {
+      onNewUser: vi.fn(),
+      onEmailVerified: vi.fn(),
+      onAuthenticate: vi.fn(),
+      getUserIdByEmail: vi.fn().mockImplementation(async ({ email }) => {
+        return email === 'test@example.com' ? 'test-user' : null;
+      }),
+      storeVerificationCode: vi.fn(),
+      verifyVerificationCode: vi.fn().mockImplementation(async ({ email, code }) => {
+        return email === 'test@example.com' && code === '123456';
+      }),
+      sendVerificationCode: vi.fn().mockResolvedValue(true)
+    };
+
+    const middlewareWithWebHooks = withAuth(mockHandler, {
+      hooks: baseHooks
+    });
+
+    beforeEach(() => {
+      Object.values(baseHooks).forEach(mock => mock.mockClear?.());
+    });
+
+    it('should handle valid web auth code and maintain user identity', async () => {
+      const request = new Request(`http://localhost/?code=test-web-code`);
+      const response = await middlewareWithWebHooks(request, mockEnv);
+
+      // Should redirect to remove code from URL
+      expect(response.status).toBe(302);
+      expect(response.headers.get('Location')).toBe('http://localhost/');
+
+      // Should set auth cookies
+      const cookies = response.headers.getSetCookie?.() || response.headers.get('Set-Cookie')?.split(', ');
+      expect(cookies?.some(c => c.includes('auth_session_token='))).toBe(true);
+      expect(cookies?.some(c => c.includes('auth_refresh_token='))).toBe(true);
+    });
+
+    it('should preserve other query parameters when redirecting', async () => {
+      const request = new Request(`http://localhost/?code=test-web-code&other=param`);
+      const response = await middlewareWithWebHooks(request, mockEnv);
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get('Location')).toBe('http://localhost/?other=param');
+    });
+
+    it('should handle web auth code on any path', async () => {
+      const request = new Request(`http://localhost/some/path?code=test-web-code`);
+      const response = await middlewareWithWebHooks(request, mockEnv);
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get('Location')).toBe('http://localhost/some/path');
+    });
+
+    it('should fall back to anonymous user if web auth code is invalid', async () => {
+      const request = new Request(`http://localhost/?code=invalid-token`);
+      const response = await middlewareWithWebHooks(request, mockEnv);
+
+      // Should proceed with normal auth flow (creating anonymous user)
+      expect(mockHandler).toHaveBeenCalledWith(
+        request,
+        mockEnv,
+        { userId: 'test-uuid', sessionId: 'test-uuid', sessionToken: 'new-session-token' }
+      );
+
+      // Should not redirect
+      expect(response.status).not.toBe(302);
     });
   });
 }); 

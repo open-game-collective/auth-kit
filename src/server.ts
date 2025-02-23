@@ -325,16 +325,21 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
             return new Response("Invalid session token", { status: 401 });
           }
 
-          // Generate a short-lived web auth code
-          const code = crypto.randomUUID();
-          const expiresIn = 300; // 5 minutes
+          // Generate a short-lived JWT containing the user and session info
+          const expiresIn = "5m"; // 5 minutes
+          const webAuthCode = await new SignJWT({ 
+            userId: payload.userId,
+            sessionId: payload.sessionId // Include the original sessionId
+          })
+            .setProtectedHeader({ alg: "HS256" })
+            .setExpirationTime(expiresIn)
+            .setAudience("WEB_AUTH")
+            .sign(new TextEncoder().encode(env.AUTH_SECRET));
 
-          // Store the code temporarily (you may want to add a hook for this)
-          // For now, we'll just return it directly since verification happens server-side
           return new Response(
             JSON.stringify({
-              code,
-              expiresIn
+              code: webAuthCode,
+              expiresIn: 300 // 5 minutes in seconds
             }),
             {
               headers: { "Content-Type": "application/json" }
@@ -372,6 +377,60 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
     // Handle auth routes first
     if (url.pathname.startsWith("/auth/")) {
       return router(request, env);
+    }
+
+    // Check for web auth code in URL
+    const webAuthCode = url.searchParams.get('code');
+    if (webAuthCode) {
+      try {
+        // Verify the JWT web auth code
+        const verified = await jwtVerify(
+          webAuthCode, 
+          new TextEncoder().encode(env.AUTH_SECRET),
+          { audience: "WEB_AUTH" }
+        );
+        
+        const payload = verified.payload as { userId: string; sessionId: string };
+        if (payload.userId && payload.sessionId) {
+          // Create new tokens but maintain the same sessionId from mobile
+          const newSessionToken = await new SignJWT({ 
+            userId: payload.userId,
+            sessionId: payload.sessionId // Use the original sessionId
+          })
+            .setProtectedHeader({ alg: "HS256" })
+            .setAudience("SESSION")
+            .setExpirationTime("15m")
+            .sign(new TextEncoder().encode(env.AUTH_SECRET));
+
+          const newRefreshToken = await createRefreshToken(payload.userId, env.AUTH_SECRET);
+
+          // Redirect to remove the code from URL
+          const redirectUrl = new URL(request.url);
+          redirectUrl.searchParams.delete('code');
+          
+          const response = new Response(null, {
+            status: 302,
+            headers: {
+              'Location': redirectUrl.toString()
+            }
+          });
+
+          // Set the auth cookies
+          response.headers.append(
+            "Set-Cookie",
+            `${SESSION_TOKEN_COOKIE}=${newSessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+          );
+          response.headers.append(
+            "Set-Cookie",
+            `${REFRESH_TOKEN_COOKIE}=${newRefreshToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+          );
+
+          return response;
+        }
+      } catch (error) {
+        console.error('Failed to verify web auth code:', error);
+        // If verification fails, continue with normal auth flow
+      }
     }
 
     const sessionToken = getCookie(request, SESSION_TOKEN_COOKIE);
