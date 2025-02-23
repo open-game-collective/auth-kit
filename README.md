@@ -13,6 +13,11 @@ A headless, isomorphic authentication toolkit that runs seamlessly across server
   - [4️⃣ Set up Auth Client and React Integration](#4️⃣-set-up-auth-client-and-react-integration)
 - [Architecture](#architecture)
 - [API Reference](#api-reference)
+  - [Client API](#client-api)
+  - [Server API](#server-api)
+  - [React API](#react-api)
+  - [Test API](#test-api)
+  - [HTTP Endpoints](#http-endpoints)
 - [Troubleshooting](#troubleshooting)
 - [TypeScript Types](#typescript-types)
 - [Testing with Storybook](#testing-with-storybook)
@@ -502,7 +507,7 @@ Auth Kit is comprised of three core components:
 
 ## API Reference
 
-### 🔐 @open-game-collective/auth-kit/client
+### Client API
 
 The client provides methods for managing authentication:
 
@@ -539,7 +544,7 @@ interface AuthClient {
   // expiresIn: Expiration time in seconds (e.g. 300 for 5 minutes)
   ```
 
-### 🖥️ @open-game-collective/auth-kit/server
+### Server API
 
 The server provides two main exports:
 
@@ -583,7 +588,7 @@ WebBrowser.openAuthSessionAsync(url);
 // 4. Redirects to the app
 ```
 
-### ⚛️ @open-game-collective/auth-kit/react
+### React API
 
 `createAuthContext()`
 
@@ -592,7 +597,7 @@ Creates a React context for auth state management, providing:
 - Hooks: `useClient` and `useSelector` for accessing and subscribing to state.
 - Conditional components: `<Loading>`, `<Authenticated>`, `<Verified>`, and `<Unverified>`.
 
-### 🧪 @open-game-collective/auth-kit/test
+### Test API
 
 `createAuthMockClient(config)`
 
@@ -672,6 +677,55 @@ The mock client provides additional testing utilities:
 - All client methods are Jest spies for tracking calls
 - State changes are synchronous for easier testing
 - No actual network requests are made
+
+### HTTP Endpoints
+
+The following endpoints are available when using the Auth Kit server middleware:
+
+#### No Authentication Required
+
+1. `POST /auth/anonymous`
+   - Creates new anonymous user
+   - Returns: `{ userId, sessionToken, refreshToken }`
+   - Optional body: `{ refreshTokenExpiresIn, sessionTokenExpiresIn }`
+
+2. `POST /auth/verify`
+   - Verifies email code
+   - Body: `{ email, code }`
+   - Returns: `{ success, userId, sessionToken, refreshToken }`
+
+3. `POST /auth/request-code`
+   - Requests email verification code
+   - Body: `{ email }`
+   - Returns: `{ success, message, expiresIn }`
+
+4. `POST /auth/logout`
+   - Clears session cookies
+   - Returns: `{ success }`
+   - Note: No auth required since it just clears cookies
+
+#### Authentication Required
+
+5. `POST /auth/refresh`
+   - Requires: `Authorization: Bearer <refresh_token>`
+   - Returns: `{ success, sessionToken, refreshToken }`
+   - Error: 401 if missing or invalid token
+
+6. `POST /auth/web-code`
+   - Requires: `Authorization: Bearer <session_token>`
+   - Returns: `{ code, expiresIn }`
+   - Error: 401 if missing or invalid token
+   - Used for mobile-to-web authentication
+
+#### Security Notes
+
+- All endpoints require HTTPS in production
+- Tokens are JWT-based with appropriate expiration
+- Session tokens expire in 15 minutes by default
+- Refresh tokens expire in 7 days by default
+- Web auth codes expire in 5 minutes
+- All tokens are cryptographically signed
+- Cookies are HTTP-only, Secure, and SameSite=Strict
 
 ## Troubleshooting
 
