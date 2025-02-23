@@ -6,6 +6,7 @@ A headless, isomorphic authentication toolkit that runs seamlessly across server
 
 - [Installation](#installation)
 - [Key Features](#key-features)
+- [Authentication Flow](#authentication-flow)
 - [Usage Guide](#usage-guide)
   - [1️⃣ Set up Environment and Server](#1️⃣-set-up-environment-and-server)
   - [2️⃣ Access Auth in React Router Routes](#2️⃣-access-auth-in-react-router-routes)
@@ -43,6 +44,117 @@ pnpm add @open-game-collective/auth-kit
 - 🎨 **React Integration**: Ready-to-use hooks and components for auth state management.
 - 🔌 **Customizable**: Integrate with your own storage, email delivery systems, and UI components.
 - 📱 **Platform Agnostic**: Same API and behavior across web and mobile platforms.
+
+## Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant C as Client
+    participant S as Server
+    participant E as Email
+
+    Note over U,S: Anonymous Session
+    U->>S: First Visit
+    S->>S: Create Anonymous User
+    S->>C: Set Session & Refresh Cookies
+    
+    Note over U,S: Email Verification
+    U->>C: Enter Email
+    C->>S: POST /auth/request-code
+    S->>E: Send Code
+    E->>U: Deliver Code
+    U->>C: Submit Code
+    C->>S: POST /auth/verify
+    S->>S: Verify & Upgrade User
+    S->>C: New Session & Refresh Tokens
+    
+    Note over U,S: Session Management
+    C->>S: API Requests
+    S->>S: Validate Session Token
+    alt Session Expired
+        S->>S: Check Refresh Token
+        S->>C: New Session Token
+    end
+    
+    Note over U,S: Logout
+    U->>C: Logout
+    C->>S: POST /auth/logout
+    S->>C: Clear Cookies
+    Note over U,S: Next visit starts new anonymous session
+```
+
+Here's the typical flow from anonymous user to authenticated and back:
+
+### 1. Anonymous Session Creation
+- **First Visit**: When a user first visits your app, they automatically get an anonymous session
+- **Server Action**: `withAuth` middleware creates a new anonymous user
+- **Cookies Set**:
+  - `auth_session_token` (15m expiry)
+  - `auth_refresh_token` (7d expiry)
+- **State**: User has anonymous session with valid userId but is not verified
+
+### 2. Email Verification
+1. **Request Code**
+   - **Client Call**: `client.requestCode('user@example.com')`
+   - **API**: `POST /auth/request-code`
+   - **Action**: Sends verification code to email
+   - **Cookies**: Unchanged
+
+2. **Verify Code**
+   - **Client Call**: `client.verifyEmail('user@example.com', '123456')`
+   - **API**: `POST /auth/verify`
+   - **Action**: Verifies code and upgrades anonymous user
+   - **Cookies Updated**:
+     - New `auth_session_token`
+     - New `auth_refresh_token`
+   - **State**: User is now verified and authenticated
+
+### 3. Session Management
+- **Token Refresh**
+  - **Trigger**: Session token expires (15m)
+  - **Server Action**: Uses refresh token to issue new session
+  - **Cookies Updated**:
+    - New `auth_session_token`
+    - Refresh token unchanged
+  - **State**: Seamless session continuation
+
+### 4. Logout
+- **Client Call**: `client.logout()`
+- **API**: `POST /auth/logout`
+- **Cookies Cleared**:
+  - `auth_session_token` removed
+  - `auth_refresh_token` removed
+- **Next Visit**: New anonymous session created
+
+### Example Flow
+
+```typescript
+// 1. App starts with anonymous session (automatic)
+const client = createAuthClient({
+  host: "api.example.com",
+  userId: "anon-123",      // From server
+  sessionToken: "abc..."   // From cookie
+});
+
+// 2. User initiates email verification
+await client.requestCode("user@example.com");
+// -> Sends email with code
+
+// 3. User submits verification code
+await client.verifyEmail("user@example.com", "123456");
+// -> Anonymous session upgraded to verified
+// -> New session & refresh tokens set in cookies
+
+// 4. Session management (automatic)
+// When session token expires, server uses refresh token
+// to create new session token
+
+// 5. User logs out
+await client.logout();
+// -> Cookies cleared
+// -> Next visit starts new anonymous session
+```
 
 ## Usage Guide
 
