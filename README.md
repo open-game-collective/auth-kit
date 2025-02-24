@@ -84,6 +84,117 @@ sequenceDiagram
     Note over U,S: Next visit starts new anonymous session
 ```
 
+### Mobile-to-Web Authentication Flow
+
+When users want to access their mobile app session in a web browser (e.g., opening a link from the mobile app), the following flow is used:
+
+```mermaid
+sequenceDiagram
+    participant M as OpenGame App
+    participant A as opengame.org/auth
+    participant G as Game Site (triviajam.tv)
+    participant W as WebView
+
+    Note over M,A: User wants to play a game
+    M->>A: POST /auth/web-code
+    Note right of A: Validates OpenGame session
+    A->>M: Returns short-lived auth code
+    
+    M->>W: Open game URL with auth code
+    Note right of W: triviajam.tv?code=xyz
+    W->>G: GET / with auth code
+    
+    G->>A: Verify auth code
+    Note right of A: Validates code & returns user info
+    A->>G: User verified
+    
+    G->>G: Create game session
+    G->>W: Set game session cookies
+    Note over W: Cookies for triviajam.tv domain
+    
+    rect rgb(230, 240, 255)
+        Note over W,G: All requests include game cookies
+        W->>G: GET /game.html
+        W->>G: POST /api/game-state
+        W->>G: GET /assets/sprites.png
+    end
+```
+
+The mobile-to-web flow allows users to seamlessly transition from mobile to web while maintaining their authentication state. The process is secure and requires no user interaction.
+
+Important: This flow requires two separate services running the `withAuth` middleware:
+1. Mobile API service (e.g., api.app.com)
+   - Handles mobile app authentication
+   - Issues web auth codes via `/auth/web-code`
+   - Uses the same `AUTH_SECRET` for JWT signing
+
+2. Web service (e.g., app.com)
+   - Serves the web application
+   - Validates web auth codes
+   - Manages web sessions with cookies
+   - Must use the same `AUTH_SECRET` to verify JWTs
+
+After the web auth code is verified:
+1. The web service sets HTTP-only session cookies for its domain
+2. The WebView automatically attaches these cookies to every request to that domain:
+   - Page loads
+   - API calls
+   - Asset requests (images, scripts, etc.)
+3. No manual cookie management needed - the WebView handles it all
+4. Cookies are isolated to the web service's domain
+
+### React Native Implementation
+
+```typescript
+import * as WebBrowser from 'expo-web-browser';
+// Or import { Linking } from 'react-native';
+
+async function openGame(gameUrl: string) {
+  try {
+    // 1. Get web auth code from OpenGame auth service
+    const { code, expiresIn } = await client.getWebAuthCode();
+    
+    // 2. Construct game URL with auth code
+    const url = new URL(gameUrl);
+    url.searchParams.set('code', code);
+    
+    // Example URLs:
+    // - triviajam.tv?code=xyz
+    // - standardelectric.game?code=xyz
+    
+    // 3. Open WebView with game URL
+    return (
+      <WebView 
+        source={{ uri: url.toString() }}
+        // Security configuration
+        incognito={true}
+        sharedCookiesEnabled={false}
+        thirdPartyCookiesEnabled={false}
+      />
+    );
+  } catch (error) {
+    console.error('Failed to open game:', error);
+  }
+}
+
+// Usage in OpenGame app
+function GameButton({ game }: { game: { url: string, name: string } }) {
+  return (
+    <Button 
+      title={`Play ${game.name}`} 
+      onPress={() => openGame(game.url)}
+    />
+  );
+}
+```
+
+The web application requires no special code to handle the authentication - the `withAuth` middleware automatically:
+1. Detects the auth code in the URL
+2. Validates it
+3. Creates a new web session
+4. Sets the appropriate cookies
+5. Redirects to remove the code from the URL
+
 Here's the typical flow from anonymous user to authenticated and back:
 
 ### 1. Anonymous Session Creation
