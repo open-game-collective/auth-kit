@@ -1,20 +1,31 @@
-import { vi } from 'vitest';
-import type { AuthClient, AuthState, AuthClientConfig } from "./types";
+import type { AuthClient, AuthState } from "./types";
 
 /**
  * Creates a mock auth client for testing.
- * All methods are Jest spies and state changes are synchronous.
+ * Uses a produce pattern for state updates, similar to immer.
  */
 export function createAuthMockClient(config: {
-  initialState: AuthState;
+  initialState: Partial<AuthState>;
 }): AuthClient & {
-  setState(state: Partial<AuthState>): void;
+  produce: (recipe: (draft: AuthState) => void) => void;
 } {
-  let currentState = config.initialState;
+  const defaultState: AuthState = {
+    isLoading: false,
+    host: 'test.com',
+    userId: '',
+    sessionToken: '',
+    refreshToken: null,
+    isVerified: false,
+    error: undefined
+  };
+
+  let currentState = { ...defaultState, ...config.initialState };
   const listeners = new Set<(state: AuthState) => void>();
 
-  const setState = (newState: Partial<AuthState>) => {
-    currentState = { ...currentState, ...newState };
+  const produce = (recipe: (draft: AuthState) => void) => {
+    const nextState = { ...currentState };
+    recipe(nextState);
+    currentState = nextState;
     listeners.forEach(l => l(currentState));
   };
 
@@ -24,62 +35,22 @@ export function createAuthMockClient(config: {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    requestCode: vi.fn(async (email: string) => {
-      setState({ isLoading: true });
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 0));
-      setState({ 
-        isLoading: false,
-        error: undefined
-      });
-    }),
-    verifyEmail: vi.fn(async (email: string, code: string) => {
-      setState({ isLoading: true });
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 0));
-      setState({
-        isLoading: false,
-        isVerified: true,
-        error: undefined
-      });
-      return { success: true };
-    }),
-    logout: vi.fn(async () => {
-      setState({ isLoading: true });
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 0));
-      setState({
-        isLoading: false,
-        userId: '',
-        sessionToken: '',
-        refreshToken: null,
-        isVerified: false,
-        error: undefined
-      });
-    }),
-    refresh: vi.fn(async () => {
-      setState({ isLoading: true });
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 0));
-      setState({
-        isLoading: false,
-        error: undefined
-      });
-    }),
-    getWebAuthCode: vi.fn(async () => {
-      setState({ isLoading: true });
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 0));
-      setState({
-        isLoading: false,
-        error: undefined
-      });
-      return {
-        code: 'test-web-code',
-        expiresIn: 300
-      };
-    }),
-    setState
+    requestCode: async (email: string) => {
+      throw new Error('requestCode not implemented - you need to mock this method');
+    },
+    verifyEmail: async (email: string, code: string) => {
+      throw new Error('verifyEmail not implemented - you need to mock this method');
+    },
+    logout: async () => {
+      throw new Error('logout not implemented - you need to mock this method');
+    },
+    refresh: async () => {
+      throw new Error('refresh not implemented - you need to mock this method');
+    },
+    getWebAuthCode: async () => {
+      throw new Error('getWebAuthCode not implemented - you need to mock this method');
+    },
+    produce
   };
 
   return client;
