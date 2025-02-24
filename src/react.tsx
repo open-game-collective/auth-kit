@@ -11,7 +11,16 @@ import type { AuthClient } from "./client";
 import type { AuthState } from "./types";
 
 export function createAuthContext() {
-  const AuthContext = createContext<AuthClient | null>(null);
+  // Create a dummy client that throws on any method call
+  const throwClient = new Proxy({} as AuthClient, {
+    get() {
+      throw new Error(
+        "AuthClient not found in context. Did you forget to wrap your app in <AuthContext.Provider client={...}>?"
+      );
+    },
+  });
+
+  const AuthContext = createContext<AuthClient>(throwClient);
 
   const Provider = memo(({ 
     children, 
@@ -30,19 +39,17 @@ export function createAuthContext() {
 
   function useClient(): AuthClient {
     const client = useContext(AuthContext);
-    if (!client) {
-      throw new Error("useClient must be used within an AuthContext.Provider");
-    }
     return client;
   }
 
   function useSelector<T>(selector: (state: AuthState) => T) {
     const client = useClient();
+    const memoizedSelector = useMemo(() => selector, [selector]);
     return useSyncExternalStoreWithSelector(
       client.subscribe,
       client.getState,
       client.getState,
-      selector,
+      memoizedSelector,
       defaultCompare
     );
   }
@@ -66,7 +73,7 @@ export function createAuthContext() {
   Unverified.displayName = "AuthUnverified";
 
   const Authenticated = memo(({ children }: { children: ReactNode }) => {
-    const isAuthenticated = useSelector(state => state.userId !== null);
+    const isAuthenticated = useSelector(state => Boolean(state.userId));
     return isAuthenticated ? <>{children}</> : null;
   });
   Authenticated.displayName = "AuthAuthenticated";
@@ -82,6 +89,10 @@ export function createAuthContext() {
   };
 }
 
+function defaultCompare<T>(a: T, b: T) {
+  return a === b;
+}
+
 function useSyncExternalStoreWithSelector<Snapshot, Selection>(
   subscribe: (onStoreChange: () => void) => () => void,
   getSnapshot: () => Snapshot,
@@ -89,64 +100,27 @@ function useSyncExternalStoreWithSelector<Snapshot, Selection>(
   selector: (snapshot: Snapshot) => Selection,
   isEqual?: (a: Selection, b: Selection) => boolean
 ): Selection {
-  const [getSelection, getServerSelection] = useMemo(() => {
-    let hasMemo = false;
-    let memoizedSnapshot: Snapshot;
-    let memoizedSelection: Selection;
+  const lastSelection = useMemo(() => ({
+    value: null as Selection | null
+  }), []);
 
-    const memoizedSelector = (nextSnapshot: Snapshot) => {
-      if (!hasMemo) {
-        hasMemo = true;
-        memoizedSnapshot = nextSnapshot;
-        memoizedSelection = selector(nextSnapshot);
-        return memoizedSelection;
-      }
+  const getSelection = useCallback(() => {
+    const nextSnapshot = getSnapshot();
+    const nextSelection = selector(nextSnapshot);
 
-      if (Object.is(memoizedSnapshot, nextSnapshot)) {
-        return memoizedSelection;
-      }
+    // If we have a previous selection and it's equal to the next selection, return the previous
+    if (lastSelection.value !== null && isEqual?.(lastSelection.value, nextSelection)) {
+      return lastSelection.value;
+    }
 
-      const nextSelection = selector(nextSnapshot);
-
-      if (isEqual && isEqual(memoizedSelection, nextSelection)) {
-        memoizedSnapshot = nextSnapshot;
-        return memoizedSelection;
-      }
-
-      memoizedSnapshot = nextSnapshot;
-      memoizedSelection = nextSelection;
-      return nextSelection;
-    };
-
-    const getSnapshotWithSelector = () => memoizedSelector(getSnapshot());
-    const getServerSnapshotWithSelector = getServerSnapshot
-      ? () => memoizedSelector(getServerSnapshot())
-      : undefined;
-
-    return [getSnapshotWithSelector, getServerSnapshotWithSelector];
-  }, [getSnapshot, getServerSnapshot, selector, isEqual]);
-
-  const subscribeWithSelector = useCallback(
-    (onStoreChange: () => void) => {
-      let previousSelection = getSelection();
-      return subscribe(() => {
-        const nextSelection = getSelection();
-        if (!isEqual || !isEqual(previousSelection, nextSelection)) {
-          previousSelection = nextSelection;
-          onStoreChange();
-        }
-      });
-    },
-    [subscribe, getSelection, isEqual]
-  );
+    // Otherwise store and return the new selection
+    lastSelection.value = nextSelection;
+    return nextSelection;
+  }, [getSnapshot, selector, isEqual]);
 
   return useSyncExternalStore(
-    subscribeWithSelector,
+    subscribe,
     getSelection,
-    getServerSelection
+    getServerSnapshot ? () => selector(getServerSnapshot()) : undefined
   );
-}
-
-function defaultCompare<T>(a: T, b: T) {
-  return a === b;
 }

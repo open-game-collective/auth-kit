@@ -33,6 +33,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     sessionToken: config.sessionToken,
     refreshToken: config.refreshToken || null,
     isVerified: false,
+    error: undefined
   };
 
   const subscribers: Array<(state: AuthState) => void> = [];

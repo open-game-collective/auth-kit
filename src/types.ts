@@ -11,7 +11,7 @@ export type AuthState = {
   sessionToken: string;
   refreshToken: string | null;
   isVerified: boolean;
-  error?: string;
+  error: string | undefined;
 };
 
 export const STORAGE_KEYS = {
