@@ -7,16 +7,28 @@ const REFRESH_TOKEN_COOKIE = "auth_refresh_token";
 interface TokenPayload {
   userId: string;
   sessionId?: string;
+  email?: string;
   aud?: string;
 }
 
 async function createSessionToken(
   userId: string,
   secret: string,
-  expiresIn: string = "15m"
+  expiresIn: string = "15m",
+  email?: string
 ): Promise<string> {
   const sessionId = crypto.randomUUID();
-  return await new SignJWT({ userId, sessionId })
+  const payload: { userId: string; sessionId: string; email?: string } = { 
+    userId, 
+    sessionId 
+  };
+  
+  // Only include email if provided (for verified users)
+  if (email) {
+    payload.email = email;
+  }
+  
+  return await new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setAudience("SESSION")
     .setExpirationTime(expiresIn)
@@ -26,11 +38,12 @@ async function createSessionToken(
 async function createRefreshToken(
   userId: string,
   secret: string,
-  expiresIn: string = "7d"
+  expiresIn: string = "7d",
+  isTransient: boolean = false
 ): Promise<string> {
   return await new SignJWT({ userId })
     .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime(expiresIn)
+    .setExpirationTime(isTransient ? "1h" : expiresIn)  // Short-lived for transient tokens
     .setAudience("REFRESH")
     .sign(new TextEncoder().encode(secret));
 }
@@ -63,7 +76,7 @@ async function verifyToken(
 
 function getCookie(request: Request, name: string): string | undefined {
   // Try both lowercase and uppercase cookie header
-  const cookieHeader = request.headers.get("cookie");
+  const cookieHeader = request.headers.get("cookie") || request.headers.get("Cookie");
   
   if (!cookieHeader) {
     return undefined;
@@ -141,22 +154,41 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
             env.AUTH_SECRET,
             sessionTokenExpiresIn
           );
-          const refreshToken = await createRefreshToken(
+          const cookieRefreshToken = await createRefreshToken(
             userId, 
             env.AUTH_SECRET,
-            refreshTokenExpiresIn
+            refreshTokenExpiresIn || "7d",
+            false
+          );
+          const transientRefreshToken = await createRefreshToken(
+            userId,
+            env.AUTH_SECRET,
+            undefined,
+            true
           );
 
-          return new Response(
+          const response = new Response(
             JSON.stringify({
               userId,
               sessionToken,
-              refreshToken,
+              refreshToken: transientRefreshToken,
             }),
             {
               headers: { "Content-Type": "application/json" },
             }
           );
+
+          // Set the auth cookies
+          response.headers.append(
+            "Set-Cookie",
+            `${SESSION_TOKEN_COOKIE}=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+          );
+          response.headers.append(
+            "Set-Cookie",
+            `${REFRESH_TOKEN_COOKIE}=${cookieRefreshToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+          );
+
+          return response;
         }
 
         case "verify": {
@@ -205,27 +237,49 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
             await hooks.onEmailVerified({ userId, email, env, request });
           }
 
-          // Generate new session and refresh tokens for the authenticated user
+          // Generate tokens - long lived for cookie, short lived for response
           const sessionToken = await createSessionToken(
             userId,
-            env.AUTH_SECRET
+            env.AUTH_SECRET,
+            "15m",
+            email
           );
-          const refreshToken = await createRefreshToken(
+          const cookieRefreshToken = await createRefreshToken(
             userId,
-            env.AUTH_SECRET
+            env.AUTH_SECRET,
+            "7d",  // Long-lived for cookie
+            false
+          );
+          const transientRefreshToken = await createRefreshToken(
+            userId,
+            env.AUTH_SECRET,
+            undefined,  // Use default
+            true  // Short-lived for client
           );
 
-          return new Response(
+          const response = new Response(
             JSON.stringify({
               success: true,
               userId,
               sessionToken,
-              refreshToken,
+              refreshToken: transientRefreshToken,  // Send short-lived token in response
             }),
             {
               headers: { "Content-Type": "application/json" },
             }
           );
+
+          // Set the auth cookies with long-lived refresh token
+          response.headers.append(
+            "Set-Cookie",
+            `${SESSION_TOKEN_COOKIE}=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+          );
+          response.headers.append(
+            "Set-Cookie",
+            `${REFRESH_TOKEN_COOKIE}=${cookieRefreshToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+          );
+
+          return response;
         }
 
         case "request-code": {
@@ -264,38 +318,86 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
 
         case "refresh": {
           const authHeader = request.headers.get("Authorization");
+          const cookieRefreshToken = getCookie(request, REFRESH_TOKEN_COOKIE);
+          
+          // Try Authorization header first (for JS/RN clients), then cookie
+          let refreshToken = authHeader?.startsWith("Bearer ")
+            ? authHeader.slice(7)
+            : cookieRefreshToken;
 
-          if (!authHeader?.startsWith("Bearer ")) {
-            return new Response("No refresh token provided", { status: 401 });
+          if (!refreshToken) {
+            return new Response(
+              JSON.stringify({ error: "No refresh token provided" }),
+              { 
+                status: 401,
+                headers: { "Content-Type": "application/json" }
+              }
+            );
           }
-
-          const refreshToken = authHeader.slice(7); // Remove 'Bearer ' prefix
 
           const payload = await verifyToken(refreshToken, env.AUTH_SECRET);
 
           if (!payload) {
-            return new Response("Invalid refresh token", { status: 401 });
+            return new Response(
+              JSON.stringify({ error: "Invalid refresh token" }),
+              { 
+                status: 401,
+                headers: { "Content-Type": "application/json" }
+              }
+            );
+          }
+
+          // Get the user's email from storage if available
+          let email: string | undefined;
+          if (hooks.getUserEmail) {
+            email = await hooks.getUserEmail({ userId: payload.userId, env, request });
           }
 
           const newSessionToken = await createSessionToken(
             payload.userId,
-            env.AUTH_SECRET
-          );
-          const newRefreshToken = await createRefreshToken(
-            payload.userId,
-            env.AUTH_SECRET
+            env.AUTH_SECRET,
+            "15m",
+            email
           );
 
-          return new Response(
+          // Generate appropriate refresh tokens
+          const newCookieRefreshToken = await createRefreshToken(
+            payload.userId,
+            env.AUTH_SECRET,
+            "7d",
+            false
+          );
+          const newTransientRefreshToken = await createRefreshToken(
+            payload.userId,
+            env.AUTH_SECRET,
+            undefined,
+            true
+          );
+
+          const response = new Response(
             JSON.stringify({
               success: true,
               sessionToken: newSessionToken,
-              refreshToken: newRefreshToken,
+              refreshToken: newTransientRefreshToken,  // Send short-lived token in response
             }),
             {
               headers: { "Content-Type": "application/json" },
             }
           );
+
+          // Only set cookies if original token was from cookie
+          if (cookieRefreshToken) {
+            response.headers.append(
+              "Set-Cookie",
+              `${SESSION_TOKEN_COOKIE}=${newSessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+            );
+            response.headers.append(
+              "Set-Cookie",
+              `${REFRESH_TOKEN_COOKIE}=${newCookieRefreshToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+            );
+          }
+
+          return response;
         }
 
         case "logout": {
@@ -326,7 +428,16 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           }
 
           // Generate a short-lived web auth code using JWT
-          const code = await new SignJWT({ userId: payload.userId })
+          // Include email if it exists in the session token
+          const jwtPayload: { userId: string; email?: string } = { 
+            userId: payload.userId 
+          };
+          
+          if (payload.email) {
+            jwtPayload.email = payload.email;
+          }
+          
+          const code = await new SignJWT(jwtPayload)
             .setProtectedHeader({ alg: "HS256" })
             .setAudience("WEB_AUTH")
             .setExpirationTime("5m")
@@ -386,14 +497,21 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
           { audience: "WEB_AUTH" }
         );
 
-        const payload = verified.payload as { userId: string };
+        const payload = verified.payload as { userId: string; email?: string };
         if (!payload.userId) {
           throw new Error('Invalid payload');
         }
 
         // Create new session for the web client
         const sessionId = crypto.randomUUID();
-        const newSessionToken = await createSessionToken(payload.userId, env.AUTH_SECRET);
+        
+        // Use email from the web auth code if available
+        const newSessionToken = await createSessionToken(
+          payload.userId, 
+          env.AUTH_SECRET,
+          "15m",
+          payload.email
+        );
         const newRefreshToken = await createRefreshToken(payload.userId, env.AUTH_SECRET);
 
         // Redirect to remove the code from URL
@@ -448,7 +566,14 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
           // Valid refresh token, create new session
           userId = refreshPayload.userId;
           sessionId = crypto.randomUUID();
-          newSessionToken = await createSessionToken(userId, env.AUTH_SECRET);
+          
+          // Get the user's email if available
+          let email: string | undefined;
+          if (hooks.getUserEmail) {
+            email = await hooks.getUserEmail({ userId, env, request });
+          }
+          
+          newSessionToken = await createSessionToken(userId, env.AUTH_SECRET, "15m", email);
           newRefreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
           currentSessionToken = newSessionToken;
         } else {

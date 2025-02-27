@@ -4,14 +4,43 @@ export type UserCredentials = {
   refreshToken: string;
 };
 
+/**
+ * The authentication state object that represents the current user's session.
+ * This is the core state object used throughout the auth system.
+ */
 export type AuthState = {
-  isLoading: boolean;
-  host: string;
+  /**
+   * The unique identifier for the current user.
+   * For anonymous users, this will be a randomly generated ID prefixed with "anon-".
+   * For verified users, this will be their permanent user ID.
+   */
   userId: string;
-  sessionToken: string;
-  refreshToken: string | null;
-  isVerified: boolean;
-  error: string | undefined;
+
+  /**
+   * The JWT session token used for authenticated requests.
+   * This token has a short expiration (typically 15 minutes) and is
+   * automatically refreshed using the refresh token when needed.
+   */
+  sessionToken: string | null;
+
+  /**
+   * The user's verified email address, if they have completed verification.
+   * Will be null for anonymous users or users who haven't verified their email.
+   * The presence of an email indicates the user is verified.
+   */
+  email: string | null;
+
+  /**
+   * Indicates if an authentication operation is currently in progress.
+   * Used to show loading states in the UI during auth operations.
+   */
+  isLoading: boolean;
+
+  /**
+   * Any error that occurred during the last authentication operation.
+   * Will be null if no error occurred.
+   */
+  error: string | null;
 };
 
 export const STORAGE_KEYS = {
@@ -66,6 +95,7 @@ export interface AuthHooks<TEnv> {
   onNewUser?: (params: { userId: string; env: TEnv; request: Request }) => Promise<void>;
   onAuthenticate?: (params: { userId: string; email: string; env: TEnv; request: Request }) => Promise<void>;
   onEmailVerified?: (params: { userId: string; email: string; env: TEnv; request: Request }) => Promise<void>;
+  getUserEmail?: (params: { userId: string; env: TEnv; request: Request }) => Promise<string | undefined>;
 }
 
 export interface AuthClient {

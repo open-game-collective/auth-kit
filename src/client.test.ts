@@ -95,12 +95,10 @@ describe('AuthClient', () => {
     const state = client.getState();
     expect(state).toEqual({
       isLoading: false,
-      error: undefined,
+      error: null,
       userId: 'test-user',
       sessionToken: 'test-session',
-      refreshToken: null,
-      isVerified: false,
-      host: 'localhost:8787'
+      email: null
     });
   });
 
@@ -126,19 +124,20 @@ describe('AuthClient', () => {
 
     await client.requestCode('test@example.com');
 
-    expect(states).toHaveLength(3); // Initial -> Loading -> Success
+    expect(states).toHaveLength(4); // Initial -> Loading -> Success -> Email extraction
     expect(states[states.length - 1]).toEqual({
       isLoading: false,
-      error: undefined,
+      error: null,
       userId: 'test-user-2',
       sessionToken: 'test-session-2',
-      refreshToken: 'test-refresh',
-      isVerified: false,
-      host: 'localhost:8787'
+      email: null
     });
   });
 
   it('should handle email verification flow', async () => {
+    // Mock JWT token that includes email
+    const mockSessionToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJ0ZXN0LXVzZXItMiIsInNlc3Npb25JZCI6InNlc3Npb24taWQiLCJlbWFpbCI6InRlc3RAZXhhbXBsZS5jb20iLCJhdWQiOiJTRVNTSU9OIiwiZXhwIjoxNjE2MTYxNjE2fQ.signature';
+    
     server.use(
       http.post('http://localhost:8787/auth/request-code', () => {
         return HttpResponse.json({
@@ -151,7 +150,7 @@ describe('AuthClient', () => {
         return HttpResponse.json({
           success: true,
           userId: 'test-user-2',
-          sessionToken: 'test-session-2',
+          sessionToken: mockSessionToken,
           refreshToken: 'test-refresh',
         });
       })
@@ -172,12 +171,10 @@ describe('AuthClient', () => {
     expect(result).toEqual({ success: true });
     expect(client.getState()).toEqual({
       isLoading: false,
-      error: undefined,
+      error: null,
       userId: 'test-user-2',
-      sessionToken: 'test-session-2',
-      refreshToken: 'test-refresh',
-      isVerified: true,
-      host: 'localhost:8787'
+      sessionToken: mockSessionToken,
+      email: 'test@example.com'
     });
   });
 
@@ -198,21 +195,22 @@ describe('AuthClient', () => {
 
     expect(client.getState()).toEqual({
       isLoading: false,
-      host: 'localhost:8787',
       userId: '',
       sessionToken: '',
-      refreshToken: null,
-      isVerified: false,
-      error: undefined
+      email: null,
+      error: null
     });
   });
 
   it('should handle refresh token flow', async () => {
+    // Mock JWT token that includes email
+    const mockSessionToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJ0ZXN0LXVzZXIiLCJzZXNzaW9uSWQiOiJzZXNzaW9uLWlkIiwiZW1haWwiOiJ0ZXN0QGV4YW1wbGUuY29tIiwiYXVkIjoiU0VTU0lPTiIsImV4cCI6MTYxNjE2MTYxNn0.signature';
+    
     server.use(
       http.post('http://localhost:8787/auth/refresh', () => {
         return HttpResponse.json({
           userId: 'test-user',
-          sessionToken: 'new-session',
+          sessionToken: mockSessionToken,
           refreshToken: 'new-refresh',
         });
       })
@@ -221,22 +219,18 @@ describe('AuthClient', () => {
     const client = createAuthClient({
       host: 'localhost:8787',
       userId: 'test-user',
-      sessionToken: 'test-session'
+      sessionToken: 'test-session',
+      refreshToken: 'test-refresh'
     });
-
-    // Set refresh token in state
-    client.getState().refreshToken = 'test-refresh';
 
     await client.refresh();
 
     expect(client.getState()).toEqual({
       isLoading: false,
-      error: undefined,
+      error: null,
       userId: 'test-user',
-      sessionToken: 'new-session',
-      refreshToken: 'new-refresh',
-      isVerified: false,
-      host: 'localhost:8787'
+      sessionToken: mockSessionToken,
+      email: 'test@example.com'
     });
   });
 
@@ -265,9 +259,7 @@ describe('AuthClient', () => {
       error: 'Invalid email',
       userId: 'test-user',
       sessionToken: 'test-session',
-      refreshToken: null,
-      isVerified: false,
-      host: 'localhost:8787'
+      email: null
     });
   });
 
@@ -282,12 +274,15 @@ describe('AuthClient', () => {
   });
 
   it('should update sessionToken after successful verification', async () => {
+    // Mock JWT token that includes email
+    const mockSessionToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJ0ZXN0LXVzZXIiLCJzZXNzaW9uSWQiOiJzZXNzaW9uLWlkIiwiZW1haWwiOiJ0ZXN0QGV4YW1wbGUuY29tIiwiYXVkIjoiU0VTU0lPTiIsImV4cCI6MTYxNjE2MTYxNn0.signature';
+    
     server.use(
       http.post('http://localhost:8787/auth/verify', () => {
         return HttpResponse.json({
           success: true,
           userId: 'test-user',
-          sessionToken: 'new-session-token',
+          sessionToken: mockSessionToken,
           refreshToken: 'test-refresh'
         });
       })
@@ -301,16 +296,20 @@ describe('AuthClient', () => {
 
     await client.verifyEmail('test@example.com', '123456');
 
-    expect(client.getState().sessionToken).toBe('new-session-token');
+    expect(client.getState().sessionToken).toBe(mockSessionToken);
+    expect(client.getState().email).toBe('test@example.com');
   });
 
   it('should update sessionToken after successful refresh', async () => {
+    // Mock JWT token that includes email
+    const mockSessionToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJ0ZXN0LXVzZXIiLCJzZXNzaW9uSWQiOiJzZXNzaW9uLWlkIiwiZW1haWwiOiJ0ZXN0QGV4YW1wbGUuY29tIiwiYXVkIjoiU0VTU0lPTiIsImV4cCI6MTYxNjE2MTYxNn0.signature';
+    
     server.use(
       http.post('http://localhost:8787/auth/refresh', () => {
         return HttpResponse.json({
           success: true,
           userId: 'test-user',
-          sessionToken: 'refreshed-session-token',
+          sessionToken: mockSessionToken,
           refreshToken: 'new-refresh'
         });
       })
@@ -319,15 +318,14 @@ describe('AuthClient', () => {
     const client = createAuthClient({
       host: 'localhost:8787',
       userId: 'test-user',
-      sessionToken: 'initial-session-token'
+      sessionToken: 'initial-session-token',
+      refreshToken: 'test-refresh'
     });
-
-    // Set refresh token in state
-    client.getState().refreshToken = 'test-refresh';
 
     await client.refresh();
 
-    expect(client.getState().sessionToken).toBe('refreshed-session-token');
+    expect(client.getState().sessionToken).toBe(mockSessionToken);
+    expect(client.getState().email).toBe('test@example.com');
   });
 });
 

@@ -61,14 +61,14 @@ export function createAuthContext() {
   Loading.displayName = "AuthLoading";
 
   const Verified = memo(({ children }: { children: ReactNode }) => {
-    const isVerified = useSelector(state => state.isVerified);
-    return isVerified ? <>{children}</> : null;
+    const hasEmail = useSelector(state => Boolean(state.email));
+    return hasEmail ? <>{children}</> : null;
   });
   Verified.displayName = "AuthVerified";
 
   const Unverified = memo(({ children }: { children: ReactNode }) => {
-    const isVerified = useSelector(state => state.isVerified);
-    return !isVerified ? <>{children}</> : null;
+    const hasEmail = useSelector(state => Boolean(state.email));
+    return !hasEmail ? <>{children}</> : null;
   });
   Unverified.displayName = "AuthUnverified";
 

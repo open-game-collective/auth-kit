@@ -11,12 +11,10 @@ export function createAuthMockClient(config: {
 } {
   const defaultState: AuthState = {
     isLoading: false,
-    host: 'test.com',
     userId: '',
     sessionToken: '',
-    refreshToken: null,
-    isVerified: false,
-    error: undefined
+    email: null,
+    error: null
   };
 
   let currentState = { ...defaultState, ...config.initialState };

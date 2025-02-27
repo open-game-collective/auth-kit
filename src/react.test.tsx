@@ -25,7 +25,7 @@ describe('Auth React Integration', () => {
         initialState: {
           userId: 'test-user',
           sessionToken: 'test-token',
-          isVerified: false
+          email: null
         }
       });
 
@@ -50,17 +50,17 @@ describe('Auth React Integration', () => {
         initialState: {
           userId: 'test-user',
           sessionToken: 'test-token',
-          isVerified: false
+          email: null
         }
       });
 
       const TestComponent = () => {
         const userId = AuthContext.useSelector(state => state.userId);
-        const isVerified = AuthContext.useSelector(state => state.isVerified);
+        const hasEmail = AuthContext.useSelector(state => Boolean(state.email));
         return (
           <div>
             <span data-testid="user-id">{userId}</span>
-            <span data-testid="verified">{isVerified.toString()}</span>
+            <span data-testid="verified">{hasEmail.toString()}</span>
           </div>
         );
       };
@@ -77,7 +77,7 @@ describe('Auth React Integration', () => {
       // Update state
       act(() => {
         mockClient.produce(draft => {
-          draft.isVerified = true;
+          draft.email = 'user@example.com';
         });
       });
 
@@ -89,7 +89,7 @@ describe('Auth React Integration', () => {
         initialState: {
           userId: 'test-user',
           sessionToken: 'test-token',
-          isVerified: false,
+          email: null,
           isLoading: false
         }
       });
@@ -118,7 +118,7 @@ describe('Auth React Integration', () => {
       act(() => {
         mockClient.produce(draft => {
           draft.isLoading = true;
-          draft.isVerified = true;
+          draft.email = 'user@example.com';
         });
       });
 
@@ -148,7 +148,7 @@ describe('Auth React Integration', () => {
         initialState: {
           userId: 'test-user',
           sessionToken: 'test-token',
-          isVerified: false,
+          email: null,
           isLoading: false
         }
       });
@@ -183,7 +183,7 @@ describe('Auth React Integration', () => {
 
       act(() => {
         mockClient.produce(draft => {
-          draft.isVerified = true;
+          draft.email = 'user@example.com';
         });
       });
 
@@ -201,7 +201,7 @@ describe('Auth React Integration', () => {
 
       act(() => {
         mockClient.produce(draft => {
-          draft.isVerified = true;
+          draft.email = 'user@example.com';
         });
       });
 
@@ -263,7 +263,7 @@ describe('Auth React Integration', () => {
       act(() => {
         mockClient.produce(draft => {
           draft.isLoading = false;
-          draft.isVerified = true;
+          draft.email = 'user@example.com';
         });
       });
 
