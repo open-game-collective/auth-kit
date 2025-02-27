@@ -7,7 +7,7 @@ import {
   it,
   vi,
 } from "vitest";
-import { createAuthRouter, withAuth } from "./server";
+import { createAuthRouter, withAuth, AuthHooks } from "./server";
 
 const REFRESH_TOKEN_COOKIE = "auth_refresh_token";
 
@@ -110,6 +110,16 @@ const mockEnv = {
     }),
   },
 };
+
+// Helper function to create mock hooks for testing
+function createMockHooks(): AuthHooks<{ AUTH_SECRET: string }> {
+  return {
+    getUserIdByEmail: vi.fn().mockResolvedValue(null),
+    storeVerificationCode: vi.fn().mockResolvedValue(undefined),
+    verifyVerificationCode: vi.fn().mockResolvedValue(true),
+    sendVerificationCode: vi.fn().mockResolvedValue(true),
+  };
+}
 
 describe("Auth Router", () => {
   const onNewUser = vi.fn();
@@ -771,5 +781,130 @@ describe("Auth Middleware", () => {
       // Should not redirect
       expect(response.status).not.toBe(302);
     });
+  });
+});
+
+describe("Cookie Domain Option", () => {
+  it("should set cookies with top-level domain when useTopLevelDomain is true", async () => {
+    const mockHooks = createMockHooks();
+    const router = createAuthRouter({
+      hooks: mockHooks,
+      useTopLevelDomain: true // Enable cross-subdomain cookies
+    });
+
+    const request = new Request("https://api.example.com/auth/anonymous", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+
+    const response = await router(request, { AUTH_SECRET: "test-secret" });
+    const cookies = response.headers.get("Set-Cookie")?.split(", ");
+
+    expect(cookies).toBeDefined();
+    expect(cookies?.some(cookie => cookie.includes("Domain=.example.com"))).toBe(true);
+  });
+
+  it("should not set domain on cookies by default", async () => {
+    const mockHooks = createMockHooks();
+    const router = createAuthRouter({
+      hooks: mockHooks
+      // useTopLevelDomain defaults to false
+    });
+
+    const request = new Request("https://api.example.com/auth/anonymous", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+
+    const response = await router(request, { AUTH_SECRET: "test-secret" });
+    const cookies = response.headers.get("Set-Cookie")?.split(", ");
+
+    expect(cookies).toBeDefined();
+    expect(cookies?.length).toBe(2);
+    
+    // Check that neither cookie has a domain set
+    expect(cookies?.[0]).not.toContain("Domain=");
+    expect(cookies?.[1]).not.toContain("Domain=");
+  });
+
+  it("should set cookies with top-level domain when useTopLevelDomain is true", async () => {
+    const mockHooks = createMockHooks();
+    const router = createAuthRouter({
+      hooks: mockHooks,
+      useTopLevelDomain: true
+    });
+
+    const request = new Request("https://api.example.com/auth/anonymous", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+
+    const response = await router(request, { AUTH_SECRET: "test-secret" });
+    const cookies = response.headers.get("Set-Cookie")?.split(", ");
+
+    expect(cookies).toBeDefined();
+    expect(cookies?.length).toBe(2);
+    
+    // Check that both cookies have the domain set to the top-level domain
+    expect(cookies?.[0]).toContain("Domain=.example.com");
+    expect(cookies?.[1]).toContain("Domain=.example.com");
+  });
+
+  it("should not set domain for localhost when useTopLevelDomain is true", async () => {
+    const mockHooks = createMockHooks();
+    const router = createAuthRouter({
+      hooks: mockHooks,
+      useTopLevelDomain: true
+    });
+
+    const request = new Request("http://localhost:8787/auth/anonymous", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+
+    const response = await router(request, { AUTH_SECRET: "test-secret" });
+    const cookies = response.headers.get("Set-Cookie")?.split(", ");
+
+    expect(cookies).toBeDefined();
+    expect(cookies?.length).toBe(2);
+    
+    // Check that neither cookie has a domain set for localhost
+    expect(cookies?.[0]).not.toContain("Domain=");
+    expect(cookies?.[1]).not.toContain("Domain=");
+  });
+
+  it("should set cookies with top-level domain in withAuth middleware when useTopLevelDomain is true", async () => {
+    const mockHooks = createMockHooks();
+    const handler = withAuth(
+      async (request, env, { userId }) => {
+        return new Response("OK");
+      },
+      {
+        hooks: mockHooks,
+        useTopLevelDomain: true
+      }
+    );
+
+    const request = new Request("https://api.example.com/some-path", {
+      method: "GET"
+    });
+
+    const response = await handler(request, { AUTH_SECRET: "test-secret" });
+    const cookies = response.headers.get("Set-Cookie")?.split(", ");
+
+    expect(cookies).toBeDefined();
+    expect(cookies?.some(cookie => cookie.includes("Domain=.example.com"))).toBe(true);
   });
 });

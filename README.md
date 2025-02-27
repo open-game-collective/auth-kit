@@ -1443,3 +1443,21 @@ The mock client provides additional testing utilities:
 - All client methods are Vitest spies for tracking calls
 - State changes are synchronous for easier testing
 - No actual network requests are made
+
+## Cookie Domain Options
+
+Auth Kit supports cross-domain cookie functionality through the `useTopLevelDomain` flag:
+
+- `useTopLevelDomain`: When set to `true`, cookies will be set for the top-level domain (e.g., for "api.example.com", cookies will work across "*.example.com"). Defaults to `false`, which means cookies will only work on the exact domain.
+
+This option can be passed to both `createAuthRouter` and `withAuth` functions:
+
+```typescript
+// Example: Using the top-level domain for cookies
+const authRouter = createAuthRouter({
+  hooks,
+  useTopLevelDomain: true // Enables cookies to work across subdomains
+});
+```
+
+Note: When using `useTopLevelDomain`, the domain is automatically derived from the request. For localhost and IP addresses, no domain attribute is set on cookies.

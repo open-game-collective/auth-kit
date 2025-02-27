@@ -104,10 +104,50 @@ function generateVerificationCode(): string {
   return code.toString();
 }
 
+// Helper function to create cookie string with domain derived from request when needed
+function createCookieString(
+  name: string, 
+  value: string, 
+  options: string = "",
+  request?: Request,
+  useTopLevelDomain: boolean = false
+): string {
+  let cookieString = `${name}=${value}; HttpOnly; Secure; SameSite=Strict; Path=/`;
+  
+  // Try to derive domain from the request if useTopLevelDomain is true
+  if (request && useTopLevelDomain) {
+    const url = new URL(request.url);
+    const hostname = url.hostname;
+    
+    // Check if this is an IP address (don't set domain for IPs)
+    const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname === 'localhost';
+    
+    if (!isIpAddress && hostname) {
+      // Extract the top-level domain and first subdomain
+      // e.g., api.example.com -> .example.com
+      const parts = hostname.split('.');
+      if (parts.length > 1) {
+        // Get the top-level domain with one subdomain level
+        // For example: from "api.example.com" get ".example.com"
+        const domain = '.' + parts.slice(-2).join('.');
+        cookieString += `; Domain=${domain}`;
+      }
+    }
+  }
+  // Note: If useTopLevelDomain is false, no Domain attribute is set,
+  // which means the cookie is only valid for the exact domain
+  
+  if (options) {
+    cookieString += `; ${options}`;
+  }
+  return cookieString;
+}
+
 export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
   hooks: AuthHooks<TEnv>;
+  useTopLevelDomain?: boolean;
 }) {
-  const { hooks } = config;
+  const { hooks, useTopLevelDomain = false } = config;
 
   return async (request: Request, env: TEnv): Promise<Response> => {
     const url = new URL(request.url);
@@ -181,11 +221,11 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           // Set the auth cookies
           response.headers.append(
             "Set-Cookie",
-            `${SESSION_TOKEN_COOKIE}=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+            createCookieString(SESSION_TOKEN_COOKIE, sessionToken, "", request, useTopLevelDomain)
           );
           response.headers.append(
             "Set-Cookie",
-            `${REFRESH_TOKEN_COOKIE}=${cookieRefreshToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+            createCookieString(REFRESH_TOKEN_COOKIE, cookieRefreshToken, "", request, useTopLevelDomain)
           );
 
           return response;
@@ -272,11 +312,11 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           // Set the auth cookies with long-lived refresh token
           response.headers.append(
             "Set-Cookie",
-            `${SESSION_TOKEN_COOKIE}=${sessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+            createCookieString(SESSION_TOKEN_COOKIE, sessionToken, "", request, useTopLevelDomain)
           );
           response.headers.append(
             "Set-Cookie",
-            `${REFRESH_TOKEN_COOKIE}=${cookieRefreshToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+            createCookieString(REFRESH_TOKEN_COOKIE, cookieRefreshToken, "", request, useTopLevelDomain)
           );
 
           return response;
@@ -389,11 +429,11 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           if (cookieRefreshToken) {
             response.headers.append(
               "Set-Cookie",
-              `${SESSION_TOKEN_COOKIE}=${newSessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+              createCookieString(SESSION_TOKEN_COOKIE, newSessionToken, "", request, useTopLevelDomain)
             );
             response.headers.append(
               "Set-Cookie",
-              `${REFRESH_TOKEN_COOKIE}=${newCookieRefreshToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+              createCookieString(REFRESH_TOKEN_COOKIE, newCookieRefreshToken, "", request, useTopLevelDomain)
             );
           }
 
@@ -404,11 +444,11 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           const response = new Response(JSON.stringify({ success: true }));
           response.headers.append(
             "Set-Cookie",
-            `${SESSION_TOKEN_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`
+            createCookieString(SESSION_TOKEN_COOKIE, "", "Max-Age=0", request, useTopLevelDomain)
           );
           response.headers.append(
             "Set-Cookie",
-            `${REFRESH_TOKEN_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`
+            createCookieString(REFRESH_TOKEN_COOKIE, "", "Max-Age=0", request, useTopLevelDomain)
           );
           return response;
         }
@@ -474,10 +514,11 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
   ) => Promise<Response>,
   config: {
     hooks: AuthHooks<TEnv>;
+    useTopLevelDomain?: boolean;
   }
 ) {
-  const { hooks } = config;
-  const router = createAuthRouter({ hooks });
+  const { hooks, useTopLevelDomain = false } = config;
+  const router = createAuthRouter({ hooks, useTopLevelDomain });
 
   return async (request: Request, env: TEnv): Promise<Response> => {
     const url = new URL(request.url);
@@ -528,11 +569,11 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
         // Set the auth cookies
         response.headers.append(
           "Set-Cookie",
-          `${SESSION_TOKEN_COOKIE}=${newSessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+          createCookieString(SESSION_TOKEN_COOKIE, newSessionToken, "", request, useTopLevelDomain)
         );
         response.headers.append(
           "Set-Cookie",
-          `${REFRESH_TOKEN_COOKIE}=${newRefreshToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+          createCookieString(REFRESH_TOKEN_COOKIE, newRefreshToken, "", request, useTopLevelDomain)
         );
 
         return response;
@@ -618,13 +659,13 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
     if (newSessionToken) {
       response.headers.append(
         "Set-Cookie",
-        `${SESSION_TOKEN_COOKIE}=${newSessionToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+        createCookieString(SESSION_TOKEN_COOKIE, newSessionToken, "", request, useTopLevelDomain)
       );
     }
     if (newRefreshToken) {
       response.headers.append(
         "Set-Cookie",
-        `${REFRESH_TOKEN_COOKIE}=${newRefreshToken}; HttpOnly; Secure; SameSite=Strict; Path=/`
+        createCookieString(REFRESH_TOKEN_COOKIE, newRefreshToken, "", request, useTopLevelDomain)
       );
     }
 
