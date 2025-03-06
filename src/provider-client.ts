@@ -1,4 +1,4 @@
-import { ProviderAuthClient, ProviderAuthState, LinkedAccount, RequestsState } from './types';
+import { ProviderAuthClient, ProviderAuthState, LinkedAccount, RequestsState } from "./types";
 
 interface ProviderAuthClientConfig {
   host: string;
@@ -19,13 +19,13 @@ export function createProviderAuthClient(config: ProviderAuthClientConfig): Prov
     isLoading: false,
     error: null,
     linkedAccounts: [],
-    requests: {}
+    requests: {},
   };
 
   // Merge with provided initial state
   let state: ProviderAuthState = {
     ...defaultState,
-    ...config.initialState
+    ...config.initialState,
   };
 
   // Subscribers
@@ -47,24 +47,25 @@ export function createProviderAuthClient(config: ProviderAuthClientConfig): Prov
     requestId?: string
   ): Promise<T> => {
     // Ensure the host has a protocol
-    const host = config.host.startsWith('http://') || config.host.startsWith('https://')
-      ? config.host
-      : `http://${config.host}`;
+    const host =
+      config.host.startsWith("http://") || config.host.startsWith("https://")
+        ? config.host
+        : `http://${config.host}`;
 
     // Set loading state
     if (requestId) {
-      setState(draft => {
+      setState((draft) => {
         draft.requests = {
           ...draft.requests,
           [requestId]: {
             isLoading: true,
             error: null,
-            lastUpdated: new Date().toISOString()
-          }
+            lastUpdated: new Date().toISOString(),
+          },
         };
       });
     } else {
-      setState(draft => {
+      setState((draft) => {
         draft.isLoading = true;
         draft.error = null;
       });
@@ -74,14 +75,14 @@ export function createProviderAuthClient(config: ProviderAuthClientConfig): Prov
       const response = await fetch(`${host}/${path}`, {
         method,
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${state.sessionToken}`
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${state.sessionToken}`,
         },
-        body: body ? JSON.stringify(body) : undefined
+        body: body ? JSON.stringify(body) : undefined,
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+        const errorData = await response.json().catch(() => ({ message: "Unknown error" }));
         throw new Error(errorData.message || `API error: ${response.status}`);
       }
 
@@ -89,45 +90,45 @@ export function createProviderAuthClient(config: ProviderAuthClientConfig): Prov
 
       // Clear loading state
       if (requestId) {
-        setState(draft => {
+        setState((draft) => {
           draft.requests = {
             ...draft.requests,
             [requestId]: {
               isLoading: false,
               error: null,
-              lastUpdated: new Date().toISOString()
-            }
+              lastUpdated: new Date().toISOString(),
+            },
           };
         });
       } else {
-        setState(draft => {
+        setState((draft) => {
           draft.isLoading = false;
         });
       }
 
       return data;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
       // Set error state
       if (requestId) {
-        setState(draft => {
+        setState((draft) => {
           draft.requests = {
             ...draft.requests,
             [requestId]: {
               isLoading: false,
               error: errorMessage,
-              lastUpdated: new Date().toISOString()
-            }
+              lastUpdated: new Date().toISOString(),
+            },
           };
         });
       } else {
-        setState(draft => {
+        setState((draft) => {
           draft.isLoading = false;
           draft.error = errorMessage;
         });
       }
-      
+
       throw error;
     }
   };
@@ -137,7 +138,7 @@ export function createProviderAuthClient(config: ProviderAuthClientConfig): Prov
     getState() {
       return state;
     },
-    
+
     subscribe(callback) {
       subscribers.push(callback);
       callback(state);
@@ -148,130 +149,108 @@ export function createProviderAuthClient(config: ProviderAuthClientConfig): Prov
         }
       };
     },
-    
+
     async getLinkedAccounts() {
-      const requestId = 'getLinkedAccounts';
-      
+      const requestId = "getLinkedAccounts";
+
       const accounts = await apiRequest<LinkedAccount[]>(
-        'GET',
-        'linked-accounts',
+        "GET",
+        "linked-accounts",
         undefined,
         requestId
       );
-      
-      setState(draft => {
+
+      setState((draft) => {
         draft.linkedAccounts = accounts;
       });
-      
+
       return accounts;
     },
-    
+
     async initiateAccountLinking(gameId: string) {
       const requestId = `initiateAccountLinking:${gameId}`;
-      
+
       const result = await apiRequest<{
         linkToken: string;
         expiresAt: string;
-      }>(
-        'POST',
-        'account-link-token',
-        { gameId },
-        requestId
-      );
-      
+      }>("POST", "account-link-token", { gameId }, requestId);
+
       return result;
     },
-    
+
     async unlinkAccount(gameId: string) {
       const requestId = `unlinkAccount:${gameId}`;
-      
+
       try {
         await apiRequest<{ success: boolean }>(
-          'DELETE',
+          "DELETE",
           `linked-accounts/${gameId}`,
           undefined,
           requestId
         );
-        
-        setState(draft => {
+
+        setState((draft) => {
           draft.linkedAccounts = draft.linkedAccounts.filter(
-            account => account.gameId !== gameId
+            (account) => account.gameId !== gameId
           );
         });
-        
+
         return true;
       } catch (error) {
         return false;
       }
     },
-    
+
     // Inherit base auth methods
     async requestCode(email: string) {
-      await apiRequest<void>(
-        'POST',
-        'request-code',
-        { email }
-      );
+      await apiRequest<void>("POST", "request-code", { email });
     },
-    
+
     async verifyEmail(email: string, code: string) {
       const result = await apiRequest<{
         success: boolean;
         userId?: string;
         sessionToken?: string;
-      }>(
-        'POST',
-        'verify-email',
-        { email, code }
-      );
-      
+      }>("POST", "verify-email", { email, code });
+
       if (result.success && result.sessionToken) {
-        setState(draft => {
+        setState((draft) => {
           draft.email = email;
           draft.userId = result.userId || draft.userId;
           draft.sessionToken = result.sessionToken || null;
         });
       }
-      
+
       return { success: result.success };
     },
-    
+
     async logout() {
-      await apiRequest<void>(
-        'POST',
-        'logout'
-      );
-      
-      setState(draft => {
+      await apiRequest<void>("POST", "logout");
+
+      setState((draft) => {
         draft.sessionToken = null;
         draft.email = null;
         draft.linkedAccounts = [];
       });
     },
-    
+
     async refresh() {
       const result = await apiRequest<{
         sessionToken: string;
-      }>(
-        'POST',
-        'refresh'
-      );
-      
-      setState(draft => {
+      }>("POST", "refresh");
+
+      setState((draft) => {
         draft.sessionToken = result.sessionToken;
       });
     },
-    
+
     async getWebAuthCode() {
       const result = await apiRequest<{
         code: string;
         expiresIn: number;
-      }>(
-        'GET',
-        'web-auth-code'
-      );
-      
+      }>("GET", "web-auth-code");
+
       return result;
-    }
+    },
   };
-} 
+}

@@ -1,12 +1,4 @@
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAuthRouter, withAuth, AuthHooks } from "./server";
 
 const REFRESH_TOKEN_COOKIE = "auth_refresh_token";
@@ -32,9 +24,7 @@ vi.mock("jose", () => {
     if (payload.aud === "REFRESH") {
       // For refresh tokens, use different values for transient vs cookie
       return Promise.resolve(
-        payload.isTransient
-          ? "new-transient-refresh-token"
-          : "new-cookie-refresh-token"
+        payload.isTransient ? "new-transient-refresh-token" : "new-cookie-refresh-token"
       );
     }
     if (payload.aud === "WEB_AUTH") {
@@ -133,12 +123,10 @@ describe("Auth Router", () => {
     return email === "test@example.com" ? "test-user" : null;
   });
   const storeVerificationCode = vi.fn();
-  const verifyVerificationCode = vi
-    .fn()
-    .mockImplementation(async (email, code) => {
-      // For tests, accept '123456' as valid code for any email
-      return code === "123456";
-    });
+  const verifyVerificationCode = vi.fn().mockImplementation(async (email, code) => {
+    // For tests, accept '123456' as valid code for any email
+    return code === "123456";
+  });
   const sendVerificationCode = vi.fn().mockResolvedValue(true);
 
   const router = createAuthRouter<typeof mockEnv>({
@@ -184,10 +172,7 @@ describe("Auth Router", () => {
       expect.any(String),
       expect.any(Date)
     );
-    expect(sendVerificationCode).toHaveBeenCalledWith(
-      "test@example.com",
-      expect.any(String)
-    );
+    expect(sendVerificationCode).toHaveBeenCalledWith("test@example.com", expect.any(String));
   });
 
   it("should handle email verification for existing user", async () => {
@@ -215,26 +200,18 @@ describe("Auth Router", () => {
 
     // Verify cookies are set correctly
     const cookies =
-      response.headers.getSetCookie?.() ||
-      response.headers.get("Set-Cookie")?.split(", ");
+      response.headers.getSetCookie?.() || response.headers.get("Set-Cookie")?.split(", ");
     expect(cookies).toBeDefined();
-    expect(
-      cookies?.some((c) => c.includes("auth_session_token=new-session-token"))
-    ).toBe(true);
-    expect(
-      cookies?.some((c) =>
-        c.includes("auth_refresh_token=new-cookie-refresh-token")
-      )
-    ).toBe(true);
+    expect(cookies?.some((c) => c.includes("auth_session_token=new-session-token"))).toBe(true);
+    expect(cookies?.some((c) => c.includes("auth_refresh_token=new-cookie-refresh-token"))).toBe(
+      true
+    );
     expect(cookies?.every((c) => c.includes("HttpOnly"))).toBe(true);
     expect(cookies?.every((c) => c.includes("Secure"))).toBe(true);
     expect(cookies?.every((c) => c.includes("SameSite=Strict"))).toBe(true);
 
     // Verify hooks were called
-    expect(verifyVerificationCode).toHaveBeenCalledWith(
-      "test@example.com",
-      "123456"
-    );
+    expect(verifyVerificationCode).toHaveBeenCalledWith("test@example.com", "123456");
     expect(onAuthenticate).toHaveBeenCalledWith("test-uuid-1");
     expect(onEmailVerified).toHaveBeenCalledWith("test-uuid-1", "test@example.com");
   });
@@ -256,10 +233,7 @@ describe("Auth Router", () => {
     expect(await response.json()).toEqual({ error: "Invalid or expired code" });
 
     // Verify hooks were called
-    expect(verifyVerificationCode).toHaveBeenCalledWith(
-      "test@example.com",
-      "wrong-code"
-    );
+    expect(verifyVerificationCode).toHaveBeenCalledWith("test@example.com", "wrong-code");
     // Verify no other hooks were called
     expect(onAuthenticate).not.toHaveBeenCalled();
     expect(onEmailVerified).not.toHaveBeenCalled();
@@ -318,17 +292,12 @@ describe("Auth Router", () => {
 
     // Verify cookies are set with different refresh token
     const cookies =
-      response.headers.getSetCookie?.() ||
-      response.headers.get("Set-Cookie")?.split(", ");
+      response.headers.getSetCookie?.() || response.headers.get("Set-Cookie")?.split(", ");
     expect(cookies).toBeDefined();
-    expect(
-      cookies?.some((c) => c.includes("auth_session_token=new-session-token"))
-    ).toBe(true);
-    expect(
-      cookies?.some((c) =>
-        c.includes("auth_refresh_token=new-cookie-refresh-token")
-      )
-    ).toBe(true);
+    expect(cookies?.some((c) => c.includes("auth_session_token=new-session-token"))).toBe(true);
+    expect(cookies?.some((c) => c.includes("auth_refresh_token=new-cookie-refresh-token"))).toBe(
+      true
+    );
   });
 
   it("should handle token refresh with Authorization header", async () => {
@@ -371,8 +340,7 @@ describe("Auth Router", () => {
     expect(data).toEqual({ success: true });
 
     const cookies =
-      response.headers.getSetCookie?.() ||
-      response.headers.get("Set-Cookie")?.split(", ");
+      response.headers.getSetCookie?.() || response.headers.get("Set-Cookie")?.split(", ");
     expect(cookies?.some((c) => c.includes("Max-Age=0"))).toBe(true);
   });
 
@@ -403,11 +371,9 @@ describe("Auth Router", () => {
         return email === "test@example.com" ? "test-user" : null;
       }),
       storeVerificationCode: vi.fn(),
-      verifyVerificationCode: vi
-        .fn()
-        .mockImplementation(async (email, code) => {
-          return email === "test@example.com" && code === "123456";
-        }),
+      verifyVerificationCode: vi.fn().mockImplementation(async (email, code) => {
+        return email === "test@example.com" && code === "123456";
+      }),
       sendVerificationCode: vi.fn().mockResolvedValue(true),
     };
 
@@ -518,14 +484,10 @@ describe("Auth Router", () => {
       verifyResponse.headers.getSetCookie?.() ||
       verifyResponse.headers.get("Set-Cookie")?.split(", ");
     expect(cookies).toBeDefined();
-    expect(
-      cookies?.some((c) => c.includes("auth_session_token=new-session-token"))
-    ).toBe(true);
-    expect(
-      cookies?.some((c) =>
-        c.includes("auth_refresh_token=new-cookie-refresh-token")
-      )
-    ).toBe(true);
+    expect(cookies?.some((c) => c.includes("auth_session_token=new-session-token"))).toBe(true);
+    expect(cookies?.some((c) => c.includes("auth_refresh_token=new-cookie-refresh-token"))).toBe(
+      true
+    );
     expect(cookies?.every((c) => c.includes("HttpOnly"))).toBe(true);
     expect(cookies?.every((c) => c.includes("Secure"))).toBe(true);
     expect(cookies?.every((c) => c.includes("SameSite=Strict"))).toBe(true);
@@ -536,10 +498,7 @@ describe("Auth Middleware", () => {
   const originalHeadersGet = Headers.prototype.get;
   beforeAll(() => {
     Headers.prototype.get = function (key: string) {
-      if (
-        key.toLowerCase() === "cookie" &&
-        (global as any).__testCookieValue__
-      ) {
+      if (key.toLowerCase() === "cookie" && (global as any).__testCookieValue__) {
         return (global as any).__testCookieValue__;
       }
       return originalHeadersGet.call(this, key);
@@ -559,11 +518,9 @@ describe("Auth Middleware", () => {
         return email === "test@example.com" ? "test-user" : null;
       }),
       storeVerificationCode: vi.fn(),
-      verifyVerificationCode: vi
-        .fn()
-        .mockImplementation(async (email, code) => {
-          return email === "test@example.com" && code === "123456";
-        }),
+      verifyVerificationCode: vi.fn().mockImplementation(async (email, code) => {
+        return email === "test@example.com" && code === "123456";
+      }),
       sendVerificationCode: vi.fn().mockResolvedValue(true),
     },
   });
@@ -585,15 +542,13 @@ describe("Auth Middleware", () => {
     });
 
     const cookies =
-      response.headers.getSetCookie?.() ||
-      response.headers.get("Set-Cookie")?.split(", ");
+      response.headers.getSetCookie?.() || response.headers.get("Set-Cookie")?.split(", ");
     expect(cookies?.some((c) => c.includes("auth_session_token="))).toBe(true);
     expect(cookies?.some((c) => c.includes("auth_refresh_token="))).toBe(true);
   });
 
   it("should use existing session if valid", async () => {
-    (global as any).__testCookieValue__ =
-      "auth_session_token=valid-session-token";
+    (global as any).__testCookieValue__ = "auth_session_token=valid-session-token";
     const request = new Request("http://localhost/");
 
     await middleware(request, mockEnv);
@@ -619,8 +574,7 @@ describe("Auth Middleware", () => {
     });
 
     const cookies =
-      response.headers.getSetCookie?.() ||
-      response.headers.get("Set-Cookie")?.split(", ");
+      response.headers.getSetCookie?.() || response.headers.get("Set-Cookie")?.split(", ");
     expect(cookies?.some((c) => c.includes("auth_session_token="))).toBe(true);
     expect(cookies?.some((c) => c.includes("auth_refresh_token="))).toBe(true);
   });
@@ -639,8 +593,7 @@ describe("Auth Middleware", () => {
     });
 
     const cookies =
-      response.headers.getSetCookie?.() ||
-      response.headers.get("Set-Cookie")?.split(", ");
+      response.headers.getSetCookie?.() || response.headers.get("Set-Cookie")?.split(", ");
     expect(cookies?.some((c) => c.includes("auth_session_token="))).toBe(true);
     expect(cookies?.some((c) => c.includes("auth_refresh_token="))).toBe(true);
   });
@@ -656,11 +609,9 @@ describe("Auth Middleware", () => {
           return email === "test@example.com" ? "test-user" : null;
         }),
         storeVerificationCode: vi.fn(),
-        verifyVerificationCode: vi
-          .fn()
-          .mockImplementation(async (email, code) => {
-            return email === "test@example.com" && code === "123456";
-          }),
+        verifyVerificationCode: vi.fn().mockImplementation(async (email, code) => {
+          return email === "test@example.com" && code === "123456";
+        }),
         sendVerificationCode: vi.fn().mockResolvedValue(true),
       },
     });
@@ -680,11 +631,9 @@ describe("Auth Middleware", () => {
         return email === "test@example.com" ? "test-user" : null;
       }),
       storeVerificationCode: vi.fn(),
-      verifyVerificationCode: vi
-        .fn()
-        .mockImplementation(async (email, code) => {
-          return email === "test@example.com" && code === "123456";
-        }),
+      verifyVerificationCode: vi.fn().mockImplementation(async (email, code) => {
+        return email === "test@example.com" && code === "123456";
+      }),
       sendVerificationCode: vi.fn().mockResolvedValue(true),
     };
 
@@ -706,38 +655,25 @@ describe("Auth Middleware", () => {
 
       // Should set auth cookies
       const cookies =
-        response.headers.getSetCookie?.() ||
-        response.headers.get("Set-Cookie")?.split(", ");
-      expect(cookies?.some((c) => c.includes("auth_session_token="))).toBe(
-        true
-      );
-      expect(cookies?.some((c) => c.includes("auth_refresh_token="))).toBe(
-        true
-      );
+        response.headers.getSetCookie?.() || response.headers.get("Set-Cookie")?.split(", ");
+      expect(cookies?.some((c) => c.includes("auth_session_token="))).toBe(true);
+      expect(cookies?.some((c) => c.includes("auth_refresh_token="))).toBe(true);
     });
 
     it("should preserve other query parameters when redirecting", async () => {
-      const request = new Request(
-        `http://localhost/?code=test-web-code&other=param`
-      );
+      const request = new Request(`http://localhost/?code=test-web-code&other=param`);
       const response = await middlewareWithWebHooks(request, mockEnv);
 
       expect(response.status).toBe(302);
-      expect(response.headers.get("Location")).toBe(
-        "http://localhost/?other=param"
-      );
+      expect(response.headers.get("Location")).toBe("http://localhost/?other=param");
     });
 
     it("should handle web auth code on any path", async () => {
-      const request = new Request(
-        `http://localhost/some/path?code=test-web-code`
-      );
+      const request = new Request(`http://localhost/some/path?code=test-web-code`);
       const response = await middlewareWithWebHooks(request, mockEnv);
 
       expect(response.status).toBe(302);
-      expect(response.headers.get("Location")).toBe(
-        "http://localhost/some/path"
-      );
+      expect(response.headers.get("Location")).toBe("http://localhost/some/path");
     });
 
     it("should fall back to anonymous user if web auth code is invalid", async () => {
@@ -762,7 +698,7 @@ describe("Cookie Domain Option", () => {
     const mockHooks = createMockHooks();
     const router = createAuthRouter({
       hooks: mockHooks,
-      useTopLevelDomain: true // Enable cross-subdomain cookies
+      useTopLevelDomain: true, // Enable cross-subdomain cookies
     });
 
     const request = new Request("https://api.example.com/auth/anonymous", {
@@ -777,13 +713,13 @@ describe("Cookie Domain Option", () => {
     const cookies = response.headers.get("Set-Cookie")?.split(", ");
 
     expect(cookies).toBeDefined();
-    expect(cookies?.some(cookie => cookie.includes("Domain=.example.com"))).toBe(true);
+    expect(cookies?.some((cookie) => cookie.includes("Domain=.example.com"))).toBe(true);
   });
 
   it("should not set domain on cookies by default", async () => {
     const mockHooks = createMockHooks();
     const router = createAuthRouter({
-      hooks: mockHooks
+      hooks: mockHooks,
       // useTopLevelDomain defaults to false
     });
 
@@ -800,7 +736,7 @@ describe("Cookie Domain Option", () => {
 
     expect(cookies).toBeDefined();
     expect(cookies?.length).toBe(2);
-    
+
     // Check that neither cookie has a domain set
     expect(cookies?.[0]).not.toContain("Domain=");
     expect(cookies?.[1]).not.toContain("Domain=");
@@ -810,7 +746,7 @@ describe("Cookie Domain Option", () => {
     const mockHooks = createMockHooks();
     const router = createAuthRouter({
       hooks: mockHooks,
-      useTopLevelDomain: true
+      useTopLevelDomain: true,
     });
 
     const request = new Request("https://api.example.com/auth/anonymous", {
@@ -826,7 +762,7 @@ describe("Cookie Domain Option", () => {
 
     expect(cookies).toBeDefined();
     expect(cookies?.length).toBe(2);
-    
+
     // Check that both cookies have the domain set to the top-level domain
     expect(cookies?.[0]).toContain("Domain=.example.com");
     expect(cookies?.[1]).toContain("Domain=.example.com");
@@ -836,7 +772,7 @@ describe("Cookie Domain Option", () => {
     const mockHooks = createMockHooks();
     const router = createAuthRouter({
       hooks: mockHooks,
-      useTopLevelDomain: true
+      useTopLevelDomain: true,
     });
 
     const request = new Request("http://localhost:8787/auth/anonymous", {
@@ -852,7 +788,7 @@ describe("Cookie Domain Option", () => {
 
     expect(cookies).toBeDefined();
     expect(cookies?.length).toBe(2);
-    
+
     // Check that neither cookie has a domain set for localhost
     expect(cookies?.[0]).not.toContain("Domain=");
     expect(cookies?.[1]).not.toContain("Domain=");
@@ -866,18 +802,18 @@ describe("Cookie Domain Option", () => {
       },
       {
         hooks: mockHooks,
-        useTopLevelDomain: true
+        useTopLevelDomain: true,
       }
     );
 
     const request = new Request("https://api.example.com/some-path", {
-      method: "GET"
+      method: "GET",
     });
 
     const response = await handler(request, { AUTH_SECRET: "test-secret" });
     const cookies = response.headers.get("Set-Cookie")?.split(", ");
 
     expect(cookies).toBeDefined();
-    expect(cookies?.some(cookie => cookie.includes("Domain=.example.com"))).toBe(true);
+    expect(cookies?.some((cookie) => cookie.includes("Domain=.example.com"))).toBe(true);
   });
 });

@@ -7,17 +7,17 @@ export interface AuthState {
 }
 
 export const STORAGE_KEYS = {
-  sessionToken: 'auth-kit:sessionToken',
-  sessionTokenExpiresAt: 'auth-kit:sessionTokenExpiresAt',
+  sessionToken: "auth-kit:sessionToken",
+  sessionTokenExpiresAt: "auth-kit:sessionTokenExpiresAt",
 };
 
 export class APIError extends Error {
   status: number;
-  
+
   constructor(message: string, status: number) {
     super(message);
     this.status = status;
-    this.name = 'APIError';
+    this.name = "APIError";
   }
 }
 
@@ -38,7 +38,7 @@ export interface AuthHooks<TEnv = any> {
   storeVerificationCode(email: string, code: string, expiresAt: Date): Promise<void>;
   verifyVerificationCode(email: string, code: string): Promise<boolean>;
   sendVerificationCode(email: string, code: string): Promise<void>;
-  
+
   // Base auth hooks (optional)
   onNewUser?(userId: string, email: string): Promise<void>;
   onAuthenticate?(userId: string): Promise<void>;
@@ -96,15 +96,15 @@ export interface ProviderAuthHooks {
   storeVerificationCode(email: string, code: string, expiresAt: Date): Promise<void>;
   verifyVerificationCode(email: string, code: string): Promise<boolean>;
   sendVerificationCode(email: string, code: string): Promise<void>;
-  
+
   // Provider-specific hooks (required)
   getGameIdFromApiKey(apiKey: string): Promise<string | null>;
   storeAccountLink(openGameUserId: string, gameId: string, gameUserId: string): Promise<void>;
   getLinkedAccounts(openGameUserId: string): Promise<LinkedAccount[]>;
-  
+
   // Provider-specific hooks (optional)
   removeAccountLink?(openGameUserId: string, gameId: string): Promise<boolean>;
-  
+
   // Base auth hooks (optional)
   onNewUser?(userId: string, email: string): Promise<void>;
   onAuthenticate?(userId: string): Promise<void>;
@@ -122,13 +122,17 @@ export interface ConsumerAuthClient extends AuthClient {
   getState(): ConsumerAuthState;
   subscribe(callback: (state: ConsumerAuthState) => void): () => void;
   getOpenGameLinkStatus(): Promise<
-    | { isLinked: true; openGameUserId: string; linkedAt: string; profile?: OpenGameLink['profile'] }
+    | {
+        isLinked: true;
+        openGameUserId: string;
+        linkedAt: string;
+        profile?: OpenGameLink["profile"];
+      }
     | { isLinked: false }
   >;
-  verifyLinkToken(token: string): Promise<
-    | { valid: true; openGameUserId: string; email: string }
-    | { valid: false }
-  >;
+  verifyLinkToken(
+    token: string
+  ): Promise<{ valid: true; openGameUserId: string; email: string } | { valid: false }>;
   confirmLink(token: string, gameUserId: string): Promise<boolean>;
 }
 
@@ -138,14 +142,14 @@ export interface ConsumerAuthHooks {
   storeVerificationCode(email: string, code: string, expiresAt: Date): Promise<void>;
   verifyVerificationCode(email: string, code: string): Promise<boolean>;
   sendVerificationCode(email: string, code: string): Promise<void>;
-  
+
   // Consumer-specific hooks (required)
   storeOpenGameLink(gameUserId: string, openGameUserId: string): Promise<void>;
   getOpenGameUserId(gameUserId: string): Promise<string | null>;
-  
+
   // Consumer-specific hooks (optional)
-  getOpenGameProfile?(openGameUserId: string): Promise<OpenGameLink['profile'] | null>;
-  
+  getOpenGameProfile?(openGameUserId: string): Promise<OpenGameLink["profile"] | null>;
+
   // Base auth hooks (optional)
   onNewUser?(userId: string, email: string): Promise<void>;
   onAuthenticate?(userId: string): Promise<void>;
@@ -173,4 +177,3 @@ export interface UserCredentials {
   sessionToken: string;
   email?: string;
 }
-

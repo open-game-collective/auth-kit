@@ -18,16 +18,16 @@ async function createSessionToken(
   email?: string
 ): Promise<string> {
   const sessionId = crypto.randomUUID();
-  const payload: { userId: string; sessionId: string; email?: string } = { 
-    userId, 
-    sessionId 
+  const payload: { userId: string; sessionId: string; email?: string } = {
+    userId,
+    sessionId,
   };
-  
+
   // Only include email if provided (for verified users)
   if (email) {
     payload.email = email;
   }
-  
+
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setAudience("SESSION")
@@ -43,15 +43,12 @@ async function createRefreshToken(
 ): Promise<string> {
   return await new SignJWT({ userId })
     .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime(isTransient ? "1h" : expiresIn)  // Short-lived for transient tokens
+    .setExpirationTime(isTransient ? "1h" : expiresIn) // Short-lived for transient tokens
     .setAudience("REFRESH")
     .sign(new TextEncoder().encode(secret));
 }
 
-async function verifyToken(
-  token: string,
-  secret: string
-): Promise<TokenPayload | null> {
+async function verifyToken(token: string, secret: string): Promise<TokenPayload | null> {
   try {
     const verified = await jwtVerify(token, new TextEncoder().encode(secret));
     const payload = verified.payload as unknown as TokenPayload;
@@ -77,21 +74,21 @@ async function verifyToken(
 function getCookie(request: Request, name: string): string | undefined {
   // Try both lowercase and uppercase cookie header
   const cookieHeader = request.headers.get("cookie") || request.headers.get("Cookie");
-  
+
   if (!cookieHeader) {
     return undefined;
   }
-  
+
   // Split and trim cookies
-  const cookies = cookieHeader.split(";").map(cookie => cookie.trim());
-  
+  const cookies = cookieHeader.split(";").map((cookie) => cookie.trim());
+
   // Find the specific cookie
-  const cookie = cookies.find(cookie => cookie.startsWith(`${name}=`));
-  
+  const cookie = cookies.find((cookie) => cookie.startsWith(`${name}=`));
+
   if (!cookie) {
     return undefined;
   }
-  
+
   // Extract and decode the value
   return decodeURIComponent(cookie.split("=")[1]);
 }
@@ -106,37 +103,37 @@ function generateVerificationCode(): string {
 
 // Helper function to create cookie string with domain derived from request when needed
 function createCookieString(
-  name: string, 
-  value: string, 
+  name: string,
+  value: string,
   options: string = "",
   request?: Request,
   useTopLevelDomain: boolean = false
 ): string {
   let cookieString = `${name}=${value}; HttpOnly; Secure; SameSite=Strict; Path=/`;
-  
+
   // Try to derive domain from the request if useTopLevelDomain is true
   if (request && useTopLevelDomain) {
     const url = new URL(request.url);
     const hostname = url.hostname;
-    
+
     // Check if this is an IP address (don't set domain for IPs)
-    const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname === 'localhost';
-    
+    const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname === "localhost";
+
     if (!isIpAddress && hostname) {
       // Extract the top-level domain and first subdomain
       // e.g., api.example.com -> .example.com
-      const parts = hostname.split('.');
+      const parts = hostname.split(".");
       if (parts.length > 1) {
         // Get the top-level domain with one subdomain level
         // For example: from "api.example.com" get ".example.com"
-        const domain = '.' + parts.slice(-2).join('.');
+        const domain = "." + parts.slice(-2).join(".");
         cookieString += `; Domain=${domain}`;
       }
     }
   }
   // Note: If useTopLevelDomain is false, no Domain attribute is set,
   // which means the cookie is only valid for the exact domain
-  
+
   if (options) {
     cookieString += `; ${options}`;
   }
@@ -154,9 +151,9 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
     const path = url.pathname.split("/").filter(Boolean);
 
     if (path.length < 2 || path[0] !== "auth") {
-      return new Response(JSON.stringify({ error: "Not Found" }), { 
+      return new Response(JSON.stringify({ error: "Not Found" }), {
         status: 404,
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
       });
     }
 
@@ -165,9 +162,9 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
     const route = path.join("/");
 
     if (request.method !== "POST") {
-      return new Response(JSON.stringify({ error: "Method not allowed" }), { 
+      return new Response(JSON.stringify({ error: "Method not allowed" }), {
         status: 405,
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
       });
     }
 
@@ -175,7 +172,7 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
       switch (route) {
         case "anonymous": {
           // Parse request body for token expiration times
-          const { refreshTokenExpiresIn, sessionTokenExpiresIn } = await request.json() as {
+          const { refreshTokenExpiresIn, sessionTokenExpiresIn } = (await request.json()) as {
             refreshTokenExpiresIn?: string;
             sessionTokenExpiresIn?: string;
           };
@@ -185,17 +182,17 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
 
           // Call onNewUser hook if provided
           if (hooks.onNewUser) {
-            await hooks.onNewUser(userId, '');
+            await hooks.onNewUser(userId, "");
           }
 
           // Generate new session and refresh tokens with custom expiration times
           const sessionToken = await createSessionToken(
-            userId, 
+            userId,
             env.AUTH_SECRET,
             sessionTokenExpiresIn
           );
           const cookieRefreshToken = await createRefreshToken(
-            userId, 
+            userId,
             env.AUTH_SECRET,
             refreshTokenExpiresIn || "7d",
             false
@@ -225,7 +222,13 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           );
           response.headers.append(
             "Set-Cookie",
-            createCookieString(REFRESH_TOKEN_COOKIE, cookieRefreshToken, "", request, useTopLevelDomain)
+            createCookieString(
+              REFRESH_TOKEN_COOKIE,
+              cookieRefreshToken,
+              "",
+              request,
+              useTopLevelDomain
+            )
           );
 
           return response;
@@ -244,9 +247,9 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           // Verify the code
           const isValid = await hooks.verifyVerificationCode(email, code);
           if (!isValid) {
-            return new Response(JSON.stringify({ error: "Invalid or expired code" }), { 
+            return new Response(JSON.stringify({ error: "Invalid or expired code" }), {
               status: 400,
-              headers: { "Content-Type": "application/json" }
+              headers: { "Content-Type": "application/json" },
             });
           }
 
@@ -256,7 +259,7 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
 
             // Call onNewUser hook if provided
             if (hooks.onNewUser) {
-              await hooks.onNewUser(userId, '');
+              await hooks.onNewUser(userId, "");
             }
           }
 
@@ -276,23 +279,18 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           }
 
           // Generate tokens - long lived for cookie, short lived for response
-          const sessionToken = await createSessionToken(
-            userId,
-            env.AUTH_SECRET,
-            "15m",
-            email
-          );
+          const sessionToken = await createSessionToken(userId, env.AUTH_SECRET, "15m", email);
           const cookieRefreshToken = await createRefreshToken(
             userId,
             env.AUTH_SECRET,
-            "7d",  // Long-lived for cookie
+            "7d", // Long-lived for cookie
             false
           );
           const transientRefreshToken = await createRefreshToken(
             userId,
             env.AUTH_SECRET,
-            undefined,  // Use default
-            true  // Short-lived for client
+            undefined, // Use default
+            true // Short-lived for client
           );
 
           const response = new Response(
@@ -300,7 +298,7 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
               success: true,
               userId,
               sessionToken,
-              refreshToken: transientRefreshToken,  // Send short-lived token in response
+              refreshToken: transientRefreshToken, // Send short-lived token in response
             }),
             {
               headers: { "Content-Type": "application/json" },
@@ -314,7 +312,13 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           );
           response.headers.append(
             "Set-Cookie",
-            createCookieString(REFRESH_TOKEN_COOKIE, cookieRefreshToken, "", request, useTopLevelDomain)
+            createCookieString(
+              REFRESH_TOKEN_COOKIE,
+              cookieRefreshToken,
+              "",
+              request,
+              useTopLevelDomain
+            )
           );
 
           return response;
@@ -331,46 +335,43 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
 
           // Send the code via email
           await hooks.sendVerificationCode(email, code);
-          
-          return new Response(JSON.stringify({ 
-            success: true,
-            message: "Code sent to email",
-            expiresIn: 600
-          }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              message: "Code sent to email",
+              expiresIn: 600,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
         }
 
         case "refresh": {
           const authHeader = request.headers.get("Authorization");
           const cookieRefreshToken = getCookie(request, REFRESH_TOKEN_COOKIE);
-          
+
           // Try Authorization header first (for JS/RN clients), then cookie
           let refreshToken = authHeader?.startsWith("Bearer ")
             ? authHeader.slice(7)
             : cookieRefreshToken;
 
           if (!refreshToken) {
-            return new Response(
-              JSON.stringify({ error: "No refresh token provided" }),
-              { 
-                status: 401,
-                headers: { "Content-Type": "application/json" }
-              }
-            );
+            return new Response(JSON.stringify({ error: "No refresh token provided" }), {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            });
           }
 
           const payload = await verifyToken(refreshToken, env.AUTH_SECRET);
 
           if (!payload) {
-            return new Response(
-              JSON.stringify({ error: "Invalid refresh token" }),
-              { 
-                status: 401,
-                headers: { "Content-Type": "application/json" }
-              }
-            );
+            return new Response(JSON.stringify({ error: "Invalid refresh token" }), {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            });
           }
 
           // Get the user's email from storage if available
@@ -405,7 +406,7 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
             JSON.stringify({
               success: true,
               sessionToken: newSessionToken,
-              refreshToken: newTransientRefreshToken,  // Send short-lived token in response
+              refreshToken: newTransientRefreshToken, // Send short-lived token in response
             }),
             {
               headers: { "Content-Type": "application/json" },
@@ -416,11 +417,23 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           if (cookieRefreshToken) {
             response.headers.append(
               "Set-Cookie",
-              createCookieString(SESSION_TOKEN_COOKIE, newSessionToken, "", request, useTopLevelDomain)
+              createCookieString(
+                SESSION_TOKEN_COOKIE,
+                newSessionToken,
+                "",
+                request,
+                useTopLevelDomain
+              )
             );
             response.headers.append(
               "Set-Cookie",
-              createCookieString(REFRESH_TOKEN_COOKIE, newCookieRefreshToken, "", request, useTopLevelDomain)
+              createCookieString(
+                REFRESH_TOKEN_COOKIE,
+                newCookieRefreshToken,
+                "",
+                request,
+                useTopLevelDomain
+              )
             );
           }
 
@@ -456,14 +469,14 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
 
           // Generate a short-lived web auth code using JWT
           // Include email if it exists in the session token
-          const jwtPayload: { userId: string; email?: string } = { 
-            userId: payload.userId 
+          const jwtPayload: { userId: string; email?: string } = {
+            userId: payload.userId,
           };
-          
+
           if (payload.email) {
             jwtPayload.email = payload.email;
           }
-          
+
           const code = await new SignJWT(jwtPayload)
             .setProtectedHeader({ alg: "HS256" })
             .setAudience("WEB_AUTH")
@@ -473,10 +486,10 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           return new Response(
             JSON.stringify({
               code,
-              expiresIn: 300 // 5 minutes
+              expiresIn: 300, // 5 minutes
             }),
             {
-              headers: { "Content-Type": "application/json" }
+              headers: { "Content-Type": "application/json" },
             }
           );
         }
@@ -485,9 +498,9 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           return new Response("Not found", { status: 404 });
       }
     } catch (error) {
-      return new Response(JSON.stringify({ error: "Internal server error" }), { 
+      return new Response(JSON.stringify({ error: "Internal server error" }), {
         status: 500,
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
       });
     }
   };
@@ -515,27 +528,25 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
     }
 
     // Check for web auth code in URL
-    const webAuthCode = url.searchParams.get('code');
+    const webAuthCode = url.searchParams.get("code");
     if (webAuthCode) {
       try {
         // Verify the web auth code JWT
-        const verified = await jwtVerify(
-          webAuthCode,
-          new TextEncoder().encode(env.AUTH_SECRET),
-          { audience: "WEB_AUTH" }
-        );
+        const verified = await jwtVerify(webAuthCode, new TextEncoder().encode(env.AUTH_SECRET), {
+          audience: "WEB_AUTH",
+        });
 
         const payload = verified.payload as { userId: string; email?: string };
         if (!payload.userId) {
-          throw new Error('Invalid payload');
+          throw new Error("Invalid payload");
         }
 
         // Create new session for the web client
         const sessionId = crypto.randomUUID();
-        
+
         // Use email from the web auth code if available
         const newSessionToken = await createSessionToken(
-          payload.userId, 
+          payload.userId,
           env.AUTH_SECRET,
           "15m",
           payload.email
@@ -544,13 +555,13 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
 
         // Redirect to remove the code from URL
         const redirectUrl = new URL(request.url);
-        redirectUrl.searchParams.delete('code');
-        
+        redirectUrl.searchParams.delete("code");
+
         const response = new Response(null, {
           status: 302,
           headers: {
-            'Location': redirectUrl.toString()
-          }
+            Location: redirectUrl.toString(),
+          },
         });
 
         // Set the auth cookies
@@ -566,7 +577,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
         return response;
       } catch (error) {
         // Invalid code, continue with normal auth flow
-        console.error('Invalid web auth code:', error);
+        console.error("Invalid web auth code:", error);
       }
     }
 
@@ -582,7 +593,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
     // First try to verify the session token
     if (sessionToken) {
       const payload = await verifyToken(sessionToken, env.AUTH_SECRET);
-      if (payload && payload.aud === 'SESSION') {
+      if (payload && payload.aud === "SESSION") {
         // Valid session token
         userId = payload.userId;
         sessionId = payload.sessionId || crypto.randomUUID();
@@ -590,18 +601,18 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
       } else if (refreshToken) {
         // Invalid session token but has refresh token
         const refreshPayload = await verifyToken(refreshToken, env.AUTH_SECRET);
-        if (refreshPayload && refreshPayload.aud === 'REFRESH') {
+        if (refreshPayload && refreshPayload.aud === "REFRESH") {
           // Valid refresh token, create new session
           userId = refreshPayload.userId;
           sessionId = crypto.randomUUID();
-          
+
           // Get the user's email if available
           let email: string | undefined;
           if (hooks.getUserEmail) {
             const emailResult = await hooks.getUserEmail(userId);
             email = emailResult || undefined;
           }
-          
+
           newSessionToken = await createSessionToken(userId, env.AUTH_SECRET, "15m", email);
           newRefreshToken = await createRefreshToken(userId, env.AUTH_SECRET);
           currentSessionToken = newSessionToken;
@@ -614,7 +625,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
           currentSessionToken = newSessionToken;
 
           if (hooks.onNewUser) {
-            await hooks.onNewUser(userId, '');
+            await hooks.onNewUser(userId, "");
           }
         }
       } else {
@@ -626,7 +637,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
         currentSessionToken = newSessionToken;
 
         if (hooks.onNewUser) {
-          await hooks.onNewUser(userId, '');
+          await hooks.onNewUser(userId, "");
         }
       }
     } else {
@@ -638,11 +649,15 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
       currentSessionToken = newSessionToken;
 
       if (hooks.onNewUser) {
-        await hooks.onNewUser(userId, '');
+        await hooks.onNewUser(userId, "");
       }
     }
 
-    const response = await handler(request, env, { userId, sessionId, sessionToken: currentSessionToken });
+    const response = await handler(request, env, {
+      userId,
+      sessionId,
+      sessionToken: currentSessionToken,
+    });
 
     if (newSessionToken) {
       response.headers.append(
@@ -664,8 +679,8 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
 export { AuthHooks } from "./types";
 
 // JWT secret for signing link tokens
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'auth-kit-secret');
-const LINK_TOKEN_EXPIRATION = '15m'; // 15 minutes
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || "auth-kit-secret");
+const LINK_TOKEN_EXPIRATION = "15m"; // 15 minutes
 
 /**
  * Creates a link token for account linking
@@ -674,13 +689,13 @@ async function createLinkToken(openGameUserId: string, email: string): Promise<s
   const token = await new SignJWT({
     openGameUserId,
     email,
-    type: 'link'
+    type: "link",
   })
-    .setProtectedHeader({ alg: 'HS256' })
+    .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(LINK_TOKEN_EXPIRATION)
     .sign(JWT_SECRET);
-  
+
   return token;
 }
 
@@ -689,32 +704,32 @@ async function createLinkToken(openGameUserId: string, email: string): Promise<s
  */
 function verifySession(request: Request): { userId: string } | null {
   // First try to get token from Authorization header
-  const authHeader = request.headers.get('Authorization');
+  const authHeader = request.headers.get("Authorization");
   let token: string | undefined;
-  
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.split(' ')[1];
+
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.split(" ")[1];
   }
-  
+
   // If no token in header, try to get from cookies
   if (!token) {
     token = getCookie(request, SESSION_TOKEN_COOKIE);
   }
-  
+
   if (!token) {
     return null;
   }
-  
+
   // Special case for tests - if token is mock-session-token, return a test user ID
-  if (token === 'mock-session-token') {
-    return { userId: 'test-user-id' };
+  if (token === "mock-session-token") {
+    return { userId: "test-user-id" };
   }
-  
+
   // In a real implementation, you would verify the token
   // For simplicity, we'll just extract the userId
   try {
     // This is a simplified example - in production, you should properly verify the token
-    const payload = JSON.parse(atob(token.split('.')[1]));
+    const payload = JSON.parse(atob(token.split(".")[1]));
     return { userId: payload.sub || payload.userId };
   } catch (error) {
     return null;
@@ -734,28 +749,28 @@ export function createProviderAuthRouter(hooks: ProviderAuthHooks) {
         // Verify session
         const session = verifySession(request);
         if (!session) {
-          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Get linked accounts
         const linkedAccounts = await hooks.getLinkedAccounts(session.userId);
-        
+
         return new Response(JSON.stringify(linkedAccounts), {
           status: 200,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { "Content-Type": "application/json" },
         });
       } catch (error) {
-        console.error('Error getting linked accounts:', error);
-        return new Response(JSON.stringify({ error: 'Failed to get linked accounts' }), {
+        console.error("Error getting linked accounts:", error);
+        return new Response(JSON.stringify({ error: "Failed to get linked accounts" }), {
           status: 500,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { "Content-Type": "application/json" },
         });
       }
     },
-    
+
     /**
      * Create a link token for account linking
      */
@@ -764,182 +779,181 @@ export function createProviderAuthRouter(hooks: ProviderAuthHooks) {
         // Verify session
         const session = verifySession(request);
         if (!session) {
-          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Get request body
         const body = await request.json();
         const { gameId } = body;
-        
+
         if (!gameId) {
-          return new Response(JSON.stringify({ error: 'Missing gameId' }), {
+          return new Response(JSON.stringify({ error: "Missing gameId" }), {
             status: 400,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Get user email
-        const email = await hooks.getUserEmail?.(session.userId) || '';
-        
+        const email = (await hooks.getUserEmail?.(session.userId)) || "";
+
         // Create link token
         const linkToken = await createLinkToken(session.userId, email);
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutes
-        
+
         return new Response(JSON.stringify({ linkToken, expiresAt }), {
           status: 200,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { "Content-Type": "application/json" },
         });
       } catch (error) {
-        console.error('Error creating link token:', error);
-        return new Response(JSON.stringify({ error: 'Failed to create link token' }), {
+        console.error("Error creating link token:", error);
+        return new Response(JSON.stringify({ error: "Failed to create link token" }), {
           status: 500,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { "Content-Type": "application/json" },
         });
       }
     },
-    
+
     /**
      * Verify a link token (used by games with API key)
      */
     async verifyLinkToken(request: Request): Promise<Response> {
       try {
         // Get API key from header
-        const apiKey = request.headers.get('x-api-key');
+        const apiKey = request.headers.get("x-api-key");
         if (!apiKey) {
-          return new Response(JSON.stringify({ error: 'Missing API key' }), {
+          return new Response(JSON.stringify({ error: "Missing API key" }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Verify API key
         const gameId = await hooks.getGameIdFromApiKey(apiKey);
         if (!gameId) {
-          return new Response(JSON.stringify({ error: 'Invalid API key' }), {
+          return new Response(JSON.stringify({ error: "Invalid API key" }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Get token from request body
         const body = await request.json();
         const { token } = body;
-        
+
         if (!token) {
-          return new Response(JSON.stringify({ error: 'Missing token' }), {
+          return new Response(JSON.stringify({ error: "Missing token" }), {
             status: 400,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Verify token
         try {
           const { payload } = await jwtVerify(token, JWT_SECRET);
-          
-          if (payload.type !== 'link') {
-            return new Response(JSON.stringify({ error: 'Invalid token type' }), {
+
+          if (payload.type !== "link") {
+            return new Response(JSON.stringify({ error: "Invalid token type" }), {
               status: 400,
-              headers: { 'Content-Type': 'application/json' }
+              headers: { "Content-Type": "application/json" },
             });
           }
-          
-          return new Response(JSON.stringify({
-            valid: true,
-            openGameUserId: payload.openGameUserId as string,
-            email: payload.email as string
-          }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' }
-          });
+
+          return new Response(
+            JSON.stringify({
+              valid: true,
+              openGameUserId: payload.openGameUserId as string,
+              email: payload.email as string,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
         } catch (error) {
           return new Response(JSON.stringify({ valid: false }), {
             status: 200,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
       } catch (error) {
-        console.error('Error verifying link token:', error);
-        return new Response(JSON.stringify({ error: 'Failed to verify link token' }), {
+        console.error("Error verifying link token:", error);
+        return new Response(JSON.stringify({ error: "Failed to verify link token" }), {
           status: 500,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { "Content-Type": "application/json" },
         });
       }
     },
-    
+
     /**
      * Confirm a link between accounts (used by games with API key)
      */
     async confirmLink(request: Request): Promise<Response> {
       try {
         // Get API key from header
-        const apiKey = request.headers.get('x-api-key');
+        const apiKey = request.headers.get("x-api-key");
         if (!apiKey) {
-          return new Response(JSON.stringify({ error: 'Missing API key' }), {
+          return new Response(JSON.stringify({ error: "Missing API key" }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Verify API key
         const gameId = await hooks.getGameIdFromApiKey(apiKey);
         if (!gameId) {
-          return new Response(JSON.stringify({ error: 'Invalid API key' }), {
+          return new Response(JSON.stringify({ error: "Invalid API key" }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Get token and gameUserId from request body
         const body = await request.json();
         const { token, gameUserId } = body;
-        
+
         if (!token || !gameUserId) {
-          return new Response(JSON.stringify({ error: 'Missing token or gameUserId' }), {
+          return new Response(JSON.stringify({ error: "Missing token or gameUserId" }), {
             status: 400,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Verify token
         try {
           const { payload } = await jwtVerify(token, JWT_SECRET);
-          
-          if (payload.type !== 'link') {
-            return new Response(JSON.stringify({ error: 'Invalid token type' }), {
+
+          if (payload.type !== "link") {
+            return new Response(JSON.stringify({ error: "Invalid token type" }), {
               status: 400,
-              headers: { 'Content-Type': 'application/json' }
+              headers: { "Content-Type": "application/json" },
             });
           }
-          
+
           // Store account link
-          await hooks.storeAccountLink(
-            payload.openGameUserId as string,
-            gameId,
-            gameUserId
-          );
-          
+          await hooks.storeAccountLink(payload.openGameUserId as string, gameId, gameUserId);
+
           return new Response(JSON.stringify({ success: true }), {
             status: 200,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         } catch (error) {
-          return new Response(JSON.stringify({ error: 'Invalid token' }), {
+          return new Response(JSON.stringify({ error: "Invalid token" }), {
             status: 400,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
       } catch (error) {
-        console.error('Error confirming link:', error);
-        return new Response(JSON.stringify({ error: 'Failed to confirm link' }), {
+        console.error("Error confirming link:", error);
+        return new Response(JSON.stringify({ error: "Failed to confirm link" }), {
           status: 500,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { "Content-Type": "application/json" },
         });
       }
     },
-    
+
     /**
      * Unlink an account
      */
@@ -948,42 +962,42 @@ export function createProviderAuthRouter(hooks: ProviderAuthHooks) {
         // Verify session
         const session = verifySession(request);
         if (!session) {
-          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Check if removeAccountLink is implemented
         if (!hooks.removeAccountLink) {
-          return new Response(JSON.stringify({ error: 'Account unlinking not supported' }), {
+          return new Response(JSON.stringify({ error: "Account unlinking not supported" }), {
             status: 501,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Remove account link
         const success = await hooks.removeAccountLink(session.userId, gameId);
-        
+
         if (!success) {
-          return new Response(JSON.stringify({ error: 'Account link not found' }), {
+          return new Response(JSON.stringify({ error: "Account link not found" }), {
             status: 404,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         return new Response(JSON.stringify({ success: true }), {
           status: 200,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { "Content-Type": "application/json" },
         });
       } catch (error) {
-        console.error('Error unlinking account:', error);
-        return new Response(JSON.stringify({ error: 'Failed to unlink account' }), {
+        console.error("Error unlinking account:", error);
+        return new Response(JSON.stringify({ error: "Failed to unlink account" }), {
           status: 500,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { "Content-Type": "application/json" },
         });
       }
-    }
+    },
   };
 }
 
@@ -1000,46 +1014,49 @@ export function createConsumerAuthRouter(hooks: ConsumerAuthHooks) {
         // Verify session
         const session = verifySession(request);
         if (!session) {
-          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Get OpenGame user ID
         const openGameUserId = await hooks.getOpenGameUserId(session.userId);
-        
+
         if (!openGameUserId) {
           return new Response(JSON.stringify({ isLinked: false }), {
             status: 200,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Get profile if available
         let profile = undefined;
         if (hooks.getOpenGameProfile) {
           profile = await hooks.getOpenGameProfile(openGameUserId);
         }
-        
-        return new Response(JSON.stringify({
-          isLinked: true,
-          openGameUserId,
-          linkedAt: new Date().toISOString(), // In a real implementation, store and return the actual linking date
-          profile
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        });
+
+        return new Response(
+          JSON.stringify({
+            isLinked: true,
+            openGameUserId,
+            linkedAt: new Date().toISOString(), // In a real implementation, store and return the actual linking date
+            profile,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
       } catch (error) {
-        console.error('Error getting OpenGame link status:', error);
-        return new Response(JSON.stringify({ error: 'Failed to get OpenGame link status' }), {
+        console.error("Error getting OpenGame link status:", error);
+        return new Response(JSON.stringify({ error: "Failed to get OpenGame link status" }), {
           status: 500,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { "Content-Type": "application/json" },
         });
       }
     },
-    
+
     /**
      * Verify a link token
      */
@@ -1048,57 +1065,60 @@ export function createConsumerAuthRouter(hooks: ConsumerAuthHooks) {
         // Verify session
         const session = verifySession(request);
         if (!session) {
-          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Get token from request body
         const body = await request.json();
         const { token } = body;
-        
+
         if (!token) {
-          return new Response(JSON.stringify({ error: 'Missing token' }), {
+          return new Response(JSON.stringify({ error: "Missing token" }), {
             status: 400,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Verify token
         try {
           const { payload } = await jwtVerify(token, JWT_SECRET);
-          
-          if (payload.type !== 'link') {
-            return new Response(JSON.stringify({ error: 'Invalid token type' }), {
+
+          if (payload.type !== "link") {
+            return new Response(JSON.stringify({ error: "Invalid token type" }), {
               status: 400,
-              headers: { 'Content-Type': 'application/json' }
+              headers: { "Content-Type": "application/json" },
             });
           }
-          
-          return new Response(JSON.stringify({
-            valid: true,
-            openGameUserId: payload.openGameUserId as string,
-            email: payload.email as string
-          }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' }
-          });
+
+          return new Response(
+            JSON.stringify({
+              valid: true,
+              openGameUserId: payload.openGameUserId as string,
+              email: payload.email as string,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
         } catch (error) {
           return new Response(JSON.stringify({ valid: false }), {
             status: 200,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
       } catch (error) {
-        console.error('Error verifying link token:', error);
-        return new Response(JSON.stringify({ error: 'Failed to verify link token' }), {
+        console.error("Error verifying link token:", error);
+        return new Response(JSON.stringify({ error: "Failed to verify link token" }), {
           status: 500,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { "Content-Type": "application/json" },
         });
       }
     },
-    
+
     /**
      * Confirm a link between accounts
      */
@@ -1107,58 +1127,58 @@ export function createConsumerAuthRouter(hooks: ConsumerAuthHooks) {
         // Verify session
         const session = verifySession(request);
         if (!session) {
-          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          return new Response(JSON.stringify({ error: "Unauthorized" }), {
             status: 401,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Get token from request body
         const body = await request.json();
         const { token } = body;
-        
+
         if (!token) {
-          return new Response(JSON.stringify({ error: 'Missing token' }), {
+          return new Response(JSON.stringify({ error: "Missing token" }), {
             status: 400,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
-        
+
         // Verify token
         try {
           const { payload } = await jwtVerify(token, JWT_SECRET);
-          
-          if (payload.type !== 'link') {
-            return new Response(JSON.stringify({ error: 'Invalid token type' }), {
+
+          if (payload.type !== "link") {
+            return new Response(JSON.stringify({ error: "Invalid token type" }), {
               status: 400,
-              headers: { 'Content-Type': 'application/json' }
+              headers: { "Content-Type": "application/json" },
             });
           }
-          
+
           // Store OpenGame link
           const success = await hooks.storeOpenGameLink(
             session.userId,
             payload.openGameUserId as string
           );
-          
+
           return new Response(JSON.stringify({ success }), {
             status: 200,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         } catch (error) {
-          return new Response(JSON.stringify({ error: 'Invalid token' }), {
+          return new Response(JSON.stringify({ error: "Invalid token" }), {
             status: 400,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { "Content-Type": "application/json" },
           });
         }
       } catch (error) {
-        console.error('Error confirming link:', error);
-        return new Response(JSON.stringify({ error: 'Failed to confirm link' }), {
+        console.error("Error confirming link:", error);
+        return new Response(JSON.stringify({ error: "Failed to confirm link" }), {
           status: 500,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { "Content-Type": "application/json" },
         });
       }
-    }
+    },
   };
 }
 

@@ -1,62 +1,62 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, act, fireEvent } from '@testing-library/react';
-import { createProviderAuthContext } from './provider-react';
-import { createProviderAuthMockClient } from './test';
-import React from 'react';
-import type { ProviderAuthState, LinkedAccount } from './types';
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, act, fireEvent } from "@testing-library/react";
+import { createProviderAuthContext } from "./provider-react";
+import { createProviderAuthMockClient } from "./test";
+import React from "react";
+import type { ProviderAuthState, LinkedAccount } from "./types";
 
-describe('Provider Auth Context', () => {
-  describe('useClient', () => {
-    it('should provide access to the auth client', () => {
+describe("Provider Auth Context", () => {
+  describe("useClient", () => {
+    it("should provide access to the auth client", () => {
       const mockClient = createProviderAuthMockClient({
         initialState: {
-          userId: 'test-user',
-          sessionToken: 'test-token',
-          email: 'test@example.com',
+          userId: "test-user",
+          sessionToken: "test-token",
+          email: "test@example.com",
           isLoading: false,
           error: null,
           linkedAccounts: [],
-          requests: {}
-        }
+          requests: {},
+        },
       });
-      
+
       const AuthContext = createProviderAuthContext();
-      
+
       const TestComponent = () => {
         const client = AuthContext.useClient();
         return <div data-testid="user-id">{client.getState().userId}</div>;
       };
-      
+
       render(
         <AuthContext.Provider value={mockClient}>
           <TestComponent />
         </AuthContext.Provider>
       );
-      
-      expect(screen.getByTestId('user-id').textContent).toBe('test-user');
+
+      expect(screen.getByTestId("user-id").textContent).toBe("test-user");
     });
   });
-  
-  describe('useSelector', () => {
-    it('should select and subscribe to state changes', async () => {
+
+  describe("useSelector", () => {
+    it("should select and subscribe to state changes", async () => {
       const mockClient = createProviderAuthMockClient({
         initialState: {
-          userId: 'test-user',
-          sessionToken: 'test-token',
-          email: 'test@example.com',
+          userId: "test-user",
+          sessionToken: "test-token",
+          email: "test@example.com",
           isLoading: false,
           error: null,
           linkedAccounts: [],
-          requests: {}
-        }
+          requests: {},
+        },
       });
-      
+
       const AuthContext = createProviderAuthContext();
-      
+
       const TestComponent = () => {
-        const userId = AuthContext.useSelector(state => state.userId);
-        const linkedAccounts = AuthContext.useSelector(state => state.linkedAccounts);
-        
+        const userId = AuthContext.useSelector((state) => state.userId);
+        const linkedAccounts = AuthContext.useSelector((state) => state.linkedAccounts);
+
         return (
           <div>
             <div data-testid="user-id">{userId}</div>
@@ -64,50 +64,50 @@ describe('Provider Auth Context', () => {
           </div>
         );
       };
-      
+
       render(
         <AuthContext.Provider value={mockClient}>
           <TestComponent />
         </AuthContext.Provider>
       );
-      
-      expect(screen.getByTestId('user-id').textContent).toBe('test-user');
-      expect(screen.getByTestId('linked-count').textContent).toBe('0');
-      
+
+      expect(screen.getByTestId("user-id").textContent).toBe("test-user");
+      expect(screen.getByTestId("linked-count").textContent).toBe("0");
+
       // Update state
       act(() => {
-        mockClient.produce(draft => {
+        mockClient.produce((draft) => {
           draft.linkedAccounts = [
             {
-              gameId: 'game1',
-              gameUserId: 'game-user-123',
-              linkedAt: '2023-01-01T00:00:00Z',
-              gameName: 'Game 1'
-            }
+              gameId: "game1",
+              gameUserId: "game-user-123",
+              linkedAt: "2023-01-01T00:00:00Z",
+              gameName: "Game 1",
+            },
           ];
         });
       });
-      
-      expect(screen.getByTestId('linked-count').textContent).toBe('1');
+
+      expect(screen.getByTestId("linked-count").textContent).toBe("1");
     });
   });
-  
-  describe('LinkedAccounts and NoLinkedAccounts', () => {
-    it('should conditionally render based on linked accounts', async () => {
+
+  describe("LinkedAccounts and NoLinkedAccounts", () => {
+    it("should conditionally render based on linked accounts", async () => {
       const mockClient = createProviderAuthMockClient({
         initialState: {
-          userId: 'test-user',
-          sessionToken: 'test-token',
-          email: 'test@example.com',
+          userId: "test-user",
+          sessionToken: "test-token",
+          email: "test@example.com",
           isLoading: false,
           error: null,
           linkedAccounts: [],
-          requests: {}
-        }
+          requests: {},
+        },
       });
-      
+
       const AuthContext = createProviderAuthContext();
-      
+
       const TestComponent = () => {
         return (
           <div>
@@ -120,75 +120,75 @@ describe('Provider Auth Context', () => {
           </div>
         );
       };
-      
+
       render(
         <AuthContext.Provider value={mockClient}>
           <TestComponent />
         </AuthContext.Provider>
       );
-      
+
       // Initially no linked accounts
-      expect(screen.queryByTestId('has-accounts')).toBeNull();
-      expect(screen.getByTestId('no-accounts')).toBeInTheDocument();
-      
+      expect(screen.queryByTestId("has-accounts")).toBeNull();
+      expect(screen.getByTestId("no-accounts")).toBeInTheDocument();
+
       // Add linked accounts
       act(() => {
-        mockClient.produce(draft => {
+        mockClient.produce((draft) => {
           draft.linkedAccounts = [
             {
-              gameId: 'game1',
-              gameUserId: 'game-user-123',
-              linkedAt: '2023-01-01T00:00:00Z',
-              gameName: 'Game 1'
-            }
+              gameId: "game1",
+              gameUserId: "game-user-123",
+              linkedAt: "2023-01-01T00:00:00Z",
+              gameName: "Game 1",
+            },
           ];
         });
       });
-      
+
       // Now should show linked accounts
-      expect(screen.getByTestId('has-accounts')).toBeInTheDocument();
-      expect(screen.queryByTestId('no-accounts')).toBeNull();
+      expect(screen.getByTestId("has-accounts")).toBeInTheDocument();
+      expect(screen.queryByTestId("no-accounts")).toBeNull();
     });
   });
-  
-  describe('LinkedAccountsList', () => {
-    it('should render linked accounts list', async () => {
+
+  describe("LinkedAccountsList", () => {
+    it("should render linked accounts list", async () => {
       const mockClient = createProviderAuthMockClient({
         initialState: {
-          userId: 'test-user',
-          sessionToken: 'test-token',
-          email: 'test@example.com',
+          userId: "test-user",
+          sessionToken: "test-token",
+          email: "test@example.com",
           isLoading: false,
           error: null,
           linkedAccounts: [
             {
-              gameId: 'game1',
-              gameUserId: 'game-user-123',
-              linkedAt: '2023-01-01T00:00:00Z',
-              gameName: 'Game 1'
+              gameId: "game1",
+              gameUserId: "game-user-123",
+              linkedAt: "2023-01-01T00:00:00Z",
+              gameName: "Game 1",
             },
             {
-              gameId: 'game2',
-              gameUserId: 'game-user-456',
-              linkedAt: '2023-01-02T00:00:00Z',
-              gameName: 'Game 2'
-            }
+              gameId: "game2",
+              gameUserId: "game-user-456",
+              linkedAt: "2023-01-02T00:00:00Z",
+              gameName: "Game 2",
+            },
           ],
-          requests: {}
-        }
+          requests: {},
+        },
       });
-      
+
       const AuthContext = createProviderAuthContext();
-      
+
       render(
         <AuthContext.Provider value={mockClient}>
           <AuthContext.LinkedAccountsList
             render={({ accounts, isLoading, error }) => (
               <div>
-                <div data-testid="loading">{isLoading ? 'Loading' : 'Not Loading'}</div>
-                <div data-testid="error">{error || 'No Error'}</div>
+                <div data-testid="loading">{isLoading ? "Loading" : "Not Loading"}</div>
+                <div data-testid="error">{error || "No Error"}</div>
                 <div data-testid="count">{accounts.length}</div>
-                {accounts.map(account => (
+                {accounts.map((account) => (
                   <div key={account.gameId} data-testid={`game-${account.gameId}`}>
                     {account.gameName}
                   </div>
@@ -198,12 +198,12 @@ describe('Provider Auth Context', () => {
           />
         </AuthContext.Provider>
       );
-      
-      expect(screen.getByTestId('loading').textContent).toBe('Not Loading');
-      expect(screen.getByTestId('error').textContent).toBe('No Error');
-      expect(screen.getByTestId('count').textContent).toBe('2');
-      expect(screen.getByTestId('game-game1').textContent).toBe('Game 1');
-      expect(screen.getByTestId('game-game2').textContent).toBe('Game 2');
+
+      expect(screen.getByTestId("loading").textContent).toBe("Not Loading");
+      expect(screen.getByTestId("error").textContent).toBe("No Error");
+      expect(screen.getByTestId("count").textContent).toBe("2");
+      expect(screen.getByTestId("game-game1").textContent).toBe("Game 1");
+      expect(screen.getByTestId("game-game2").textContent).toBe("Game 2");
     });
   });
-}); 
+});

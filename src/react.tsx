@@ -8,7 +8,7 @@ import React, {
   useSyncExternalStore,
   useEffect,
   useRef,
-  useState
+  useState,
 } from "react";
 import type { AuthClient } from "./client";
 import type { AuthState } from "./types";
@@ -25,19 +25,17 @@ export function createAuthContext() {
 
   const AuthContext = createContext<AuthClient>(throwClient);
 
-  const Provider = memo(({ 
-    children, 
-    client 
-  }: { 
-    children: ReactNode;
-    client: AuthClient;
-  }) => {
-    return (
-      <AuthContext.Provider value={client}>
-        {children}
-      </AuthContext.Provider>
-    );
-  });
+  const Provider = memo(
+    ({
+      children,
+      client,
+    }: {
+      children: ReactNode;
+      client: AuthClient;
+    }) => {
+      return <AuthContext.Provider value={client}>{children}</AuthContext.Provider>;
+    }
+  );
   Provider.displayName = "AuthProvider";
 
   function useClient(): AuthClient {
@@ -57,25 +55,25 @@ export function createAuthContext() {
   }
 
   const Loading = memo(({ children }: { children: ReactNode }) => {
-    const isLoading = useSelector(state => state.isLoading);
+    const isLoading = useSelector((state) => state.isLoading);
     return isLoading ? <>{children}</> : null;
   });
   Loading.displayName = "AuthLoading";
 
   const Verified = memo(({ children }: { children: ReactNode }) => {
-    const hasEmail = useSelector(state => Boolean(state.email));
+    const hasEmail = useSelector((state) => Boolean(state.email));
     return hasEmail ? <>{children}</> : null;
   });
   Verified.displayName = "AuthVerified";
 
   const Unverified = memo(({ children }: { children: ReactNode }) => {
-    const hasEmail = useSelector(state => Boolean(state.email));
+    const hasEmail = useSelector((state) => Boolean(state.email));
     return !hasEmail ? <>{children}</> : null;
   });
   Unverified.displayName = "AuthUnverified";
 
   const Authenticated = memo(({ children }: { children: ReactNode }) => {
-    const isAuthenticated = useSelector(state => Boolean(state.userId));
+    const isAuthenticated = useSelector((state) => Boolean(state.userId));
     return isAuthenticated ? <>{children}</> : null;
   });
   Authenticated.displayName = "AuthAuthenticated";
@@ -112,36 +110,36 @@ export function useSyncExternalStoreWithSelector<Snapshot, Selection>(
   const [state, setState] = useState(() => selector(getSnapshot()));
   const stateRef = useRef(state);
   const snapshotRef = useRef<Snapshot>();
-  
+
   useEffect(() => {
     const checkForUpdates = () => {
       try {
         const nextSnapshot = getSnapshot();
-        
+
         // Avoid recomputing if the snapshot hasn't changed
         if (snapshotRef.current === nextSnapshot) {
           return;
         }
-        
+
         snapshotRef.current = nextSnapshot;
         const nextState = selector(nextSnapshot);
-        
+
         // Only update if the selected state has changed
         if (!compareFunction(stateRef.current, nextState)) {
           setState(nextState);
           stateRef.current = nextState;
         }
       } catch (error) {
-        console.error('Error in checkForUpdates:', error);
+        console.error("Error in checkForUpdates:", error);
       }
     };
-    
+
     // Check for updates immediately
     checkForUpdates();
-    
+
     // Subscribe to store changes
     return subscribe(checkForUpdates);
   }, [subscribe, getSnapshot, selector, compareFunction]);
-  
+
   return state;
 }
