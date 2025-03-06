@@ -21,14 +21,16 @@
       "correctness": {
         "noUnusedVariables": "error"
       }
-    }
+    },
+    "ignore": ["dist/**"]
   },
   "formatter": {
     "enabled": true,
     "formatWithErrors": false,
     "indentStyle": "space",
     "indentWidth": 2,
-    "lineWidth": 100
+    "lineWidth": 100,
+    "ignore": ["dist/**"]
   },
   "javascript": {
     "formatter": {
