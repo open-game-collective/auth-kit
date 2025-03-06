@@ -5,7 +5,10 @@ import React, {
   useCallback,
   useContext,
   useMemo,
-  useSyncExternalStore
+  useSyncExternalStore,
+  useEffect,
+  useRef,
+  useState
 } from "react";
 import type { AuthClient } from "./client";
 import type { AuthState } from "./types";
@@ -48,9 +51,8 @@ export function createAuthContext() {
     return useSyncExternalStoreWithSelector(
       client.subscribe,
       client.getState,
-      client.getState,
-      memoizedSelector,
-      defaultCompare
+      null,
+      memoizedSelector
     );
   }
 
@@ -89,38 +91,57 @@ export function createAuthContext() {
   };
 }
 
+/**
+ * Default comparison function for useSyncExternalStoreWithSelector
+ */
 function defaultCompare<T>(a: T, b: T) {
-  return a === b;
+  return Object.is(a, b);
 }
 
-function useSyncExternalStoreWithSelector<Snapshot, Selection>(
+/**
+ * Hook to subscribe to an external store with selector
+ */
+export function useSyncExternalStoreWithSelector<Snapshot, Selection>(
   subscribe: (onStoreChange: () => void) => () => void,
   getSnapshot: () => Snapshot,
   getServerSnapshot: undefined | null | (() => Snapshot),
   selector: (snapshot: Snapshot) => Selection,
   isEqual?: (a: Selection, b: Selection) => boolean
 ): Selection {
-  const lastSelection = useMemo(() => ({
-    value: null as Selection | null
-  }), []);
-
-  const getSelection = useCallback(() => {
-    const nextSnapshot = getSnapshot();
-    const nextSelection = selector(nextSnapshot);
-
-    // If we have a previous selection and it's equal to the next selection, return the previous
-    if (lastSelection.value !== null && isEqual?.(lastSelection.value, nextSelection)) {
-      return lastSelection.value;
-    }
-
-    // Otherwise store and return the new selection
-    lastSelection.value = nextSelection;
-    return nextSelection;
-  }, [getSnapshot, selector, isEqual]);
-
-  return useSyncExternalStore(
-    subscribe,
-    getSelection,
-    getServerSnapshot ? () => selector(getServerSnapshot()) : undefined
-  );
+  const compareFunction = isEqual || defaultCompare;
+  const [state, setState] = useState(() => selector(getSnapshot()));
+  const stateRef = useRef(state);
+  const snapshotRef = useRef<Snapshot>();
+  
+  useEffect(() => {
+    const checkForUpdates = () => {
+      try {
+        const nextSnapshot = getSnapshot();
+        
+        // Avoid recomputing if the snapshot hasn't changed
+        if (snapshotRef.current === nextSnapshot) {
+          return;
+        }
+        
+        snapshotRef.current = nextSnapshot;
+        const nextState = selector(nextSnapshot);
+        
+        // Only update if the selected state has changed
+        if (!compareFunction(stateRef.current, nextState)) {
+          setState(nextState);
+          stateRef.current = nextState;
+        }
+      } catch (error) {
+        console.error('Error in checkForUpdates:', error);
+      }
+    };
+    
+    // Check for updates immediately
+    checkForUpdates();
+    
+    // Subscribe to store changes
+    return subscribe(checkForUpdates);
+  }, [subscribe, getSnapshot, selector, compareFunction]);
+  
+  return state;
 }

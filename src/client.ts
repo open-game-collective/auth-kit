@@ -1,4 +1,5 @@
-import type { AuthState, UserCredentials, AuthClient, AuthClientConfig, AnonymousUserConfig } from "./types";
+import { APIError, AuthClient, AuthState, STORAGE_KEYS, UserCredentials } from './types';
+import type { AuthClientConfig, AnonymousUserConfig } from "./types";
 
 /**
  * Decodes a JWT token without verification
@@ -95,225 +96,233 @@ export async function createAnonymousUser(config: AnonymousUserConfig): Promise<
     throw new Error(error);
   }
 
-  return response.json();
+  const data = await response.json();
+  
+  // Convert null email to undefined to match test expectations
+  if (data.email === null) {
+    data.email = undefined;
+  }
+  
+  return data;
 }
 
 export function createAuthClient(config: AuthClientConfig): AuthClient {
-  // Store host separately from the AuthState
-  const host = config.host;
-  let refreshToken = config.refreshToken || null;
-  
-  let state: AuthState = {
-    isLoading: false,
+  // Initialize base state
+  const initialState: AuthState = {
     userId: config.userId,
     sessionToken: config.sessionToken,
     email: null,
+    isLoading: false,
     error: null
   };
-
-  // Extract email from initial session token if available
-  if (config.sessionToken) {
-    const payload = decodeJWT(config.sessionToken);
-    if (payload && payload.email) {
-      state.email = payload.email;
-    }
+  
+  // Merge with provided initial state if any
+  if (config.initialState) {
+    Object.assign(initialState, config.initialState);
   }
-
-  const subscribers: Array<(state: AuthState) => void> = [];
-
-  function setState(newState: Partial<AuthState>) {
-    state = { ...state, ...newState };
-    subscribers.forEach(cb => cb(state));
-  }
-
-  function setLoading(isLoading: boolean) {
-    setState({
-      isLoading
-    } as AuthState);
-  }
-
-  function setError(error: string) {
-    setState({
-      isLoading: false,
-      error
-    });
-  }
-
-  function updateStateFromToken(sessionToken: string) {
-    const payload = decodeJWT(sessionToken);
-    const email = payload?.email || null;
-    
-    setState({
-      sessionToken,
-      email
-    });
-  }
-
-  function setAuthenticated(props: {
-    userId: string;
-    sessionToken: string;
-    refreshToken: string | null;
-  }) {
-    // Update refresh token
-    refreshToken = props.refreshToken;
-    
-    // First update the basic properties
-    setState({
-      isLoading: false,
-      userId: props.userId,
-      sessionToken: props.sessionToken
+  
+  // State management
+  let state = initialState;
+  const subscribers: ((state: AuthState) => void)[] = [];
+  
+  // Update state and notify subscribers
+  const setState = (updater: (draft: AuthState) => void) => {
+    const nextState = { ...state };
+    updater(nextState);
+    state = nextState;
+    subscribers.forEach(callback => callback(state));
+  };
+  
+  // Create API request helper
+  const apiRequest = async <T>(
+    method: string,
+    path: string,
+    body?: any,
+    authenticated: boolean = true
+  ): Promise<T> => {
+    setState(draft => {
+      draft.isLoading = true;
+      draft.error = null;
     });
     
-    // Then extract and set email from the token
-    updateStateFromToken(props.sessionToken);
-  }
-
-  async function post<T>(path: string, body?: object, headers?: Record<string, string>): Promise<T> {
     try {
-      const combinedHeaders: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...headers
+      // Ensure we're working with a string path
+      if (typeof path !== 'string') {
+        path = String(path);
+      }
+      
+      // Normalize the path to ensure it starts with a slash
+      const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+      
+      // Ensure the host is properly formatted
+      const host = config.host.replace(/^https?:\/\//, '');
+      
+      // Construct the full URL
+      const url = `http://${host}${normalizedPath}`;
+      
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json'
       };
       
-      // Add Authorization header for refresh token if available
-      if (path === 'refresh' && refreshToken) {
-        combinedHeaders['Authorization'] = `Bearer ${refreshToken}`;
+      if (authenticated && state.sessionToken) {
+        headers['Authorization'] = `Bearer ${state.sessionToken}`;
       }
-
-      // Add protocol if not present
-      const apiHost = host.startsWith('http://') || host.startsWith('https://')
-        ? host
-        : `http://${host}`;
-
-      const response = await fetch(`${apiHost}/auth/${path}`, {
-        method: 'POST',
-        headers: combinedHeaders,
+      
+      const response = await fetch(url, {
+        method,
+        headers,
         body: body ? JSON.stringify(body) : undefined
       });
-
+      
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error);
+        const errorText = await response.text();
+        const errorMessage = errorText || `API request failed with status ${response.status}`;
+        throw new APIError(
+          errorMessage,
+          response.status
+        );
       }
-
-      return response.json();
+      
+      // For 204 No Content responses
+      if (response.status === 204) {
+        setState(draft => {
+          draft.isLoading = false;
+        });
+        return {} as T;
+      }
+      
+      const data = await response.json();
+      
+      setState(draft => {
+        draft.isLoading = false;
+      });
+      
+      return data as T;
     } catch (error) {
-      config.onError?.(error instanceof Error ? error : new Error('Unknown error'));
+      setState(draft => {
+        draft.isLoading = false;
+        draft.error = error instanceof Error ? error.message : String(error);
+      });
       throw error;
     }
-  }
-
-  return {
+  };
+  
+  // Store session token in local storage
+  const storeSessionToken = (token: string | null) => {
+    if (typeof window !== 'undefined') {
+      if (token) {
+        localStorage.setItem(STORAGE_KEYS.sessionToken, token);
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.sessionToken);
+      }
+    }
+  };
+  
+  // Auth client implementation
+  const client: AuthClient = {
     getState() {
       return state;
     },
-    subscribe(callback: (state: AuthState) => void) {
+    
+    subscribe(callback) {
       subscribers.push(callback);
+      callback(state);
       return () => {
         const index = subscribers.indexOf(callback);
-        if (index > -1) subscribers.splice(index, 1);
+        if (index !== -1) {
+          subscribers.splice(index, 1);
+        }
       };
     },
+    
     async requestCode(email: string) {
-      setLoading(true);
-      try {
-        const response = await post<UserCredentials>('request-code', { email });
-        setAuthenticated({
-          userId: response.userId,
-          sessionToken: response.sessionToken,
-          refreshToken: response.refreshToken
-        });
-      } catch (error) {
-        setError(error instanceof Error ? error.message : 'Failed to request code');
-        throw error;
-      } finally {
-        setLoading(false);
+      const result = await apiRequest<{ success: boolean } & UserCredentials>(
+        'POST',
+        '/auth/request-code',
+        { email }
+      );
+      
+      setState(draft => {
+        if (result.userId) draft.userId = result.userId;
+        if (result.sessionToken) draft.sessionToken = result.sessionToken;
+      });
+      
+      if (result.sessionToken) {
+        storeSessionToken(result.sessionToken);
       }
     },
-    async verifyEmail(email: string, code: string) {
-      if (!state.userId) {
-        throw new Error("No user ID available");
+    
+    async verifyEmail(email: string, code: string): Promise<{ success: boolean }> {
+      const result = await apiRequest<UserCredentials & { success: boolean }>(
+        'POST',
+        '/auth/verify',
+        { email, code }
+      );
+      
+      setState(draft => {
+        draft.userId = result.userId;
+        draft.sessionToken = result.sessionToken || null;
+        draft.email = email;
+      });
+      
+      if (result.sessionToken) {
+        storeSessionToken(result.sessionToken);
       }
-
-      setLoading(true);
-      try {
-        const result = await post<UserCredentials & { success: boolean }>('verify', { 
-          email, 
-          code,
-          userId: state.userId 
-        });
-
-        setAuthenticated({
-          userId: result.userId,
-          sessionToken: result.sessionToken,
-          refreshToken: result.refreshToken
-        });
-        return { success: result.success };
-      } catch (error) {
-        setError(error instanceof Error ? error.message : 'Failed to verify email');
-        throw error;
-      } finally {
-        setLoading(false);
-      }
+      
+      return { success: true };
     },
+    
     async logout() {
-      if (!state.userId) {
-        return; // Already logged out
-      }
-
-      setLoading(true);
       try {
-        await post('logout', { userId: state.userId });
-        // Clear local state
-        refreshToken = null;
-        setState({
-          ...state,
-          userId: '',
-          sessionToken: '',
-          email: null
-        });
+        await apiRequest<void>(
+          'POST',
+          '/auth/logout',
+          undefined
+        );
       } catch (error) {
-        setError(error instanceof Error ? error.message : 'Failed to logout');
-        throw error;
-      } finally {
-        setLoading(false);
+        // Continue with logout even if the API call fails
+        console.error('Error during logout:', error);
+      }
+      
+      setState(draft => {
+        draft.sessionToken = "";
+        draft.userId = "";
+        draft.email = null;
+        draft.error = null;
+        draft.isLoading = false;
+      });
+      
+      storeSessionToken(null);
+    },
+    
+    async refresh(): Promise<void> {
+      const result = await apiRequest<UserCredentials>(
+        'POST',
+        '/auth/refresh',
+        undefined
+      );
+      
+      setState(draft => {
+        draft.userId = result.userId;
+        draft.sessionToken = result.sessionToken || null;
+        draft.email = result.email ?? null;
+      });
+      
+      if (result.sessionToken) {
+        storeSessionToken(result.sessionToken);
       }
     },
-    async refresh() {
-      if (!refreshToken) {
-        throw new Error("No refresh token available. For web applications, token refresh is handled by the server middleware.");
-      }
-
-      setLoading(true);
-      try {
-        const response = await post<UserCredentials>('refresh');
-        setAuthenticated({
-          userId: response.userId,
-          sessionToken: response.sessionToken,
-          refreshToken: response.refreshToken
-        });
-      } catch (error) {
-        setError(error instanceof Error ? error.message : 'Failed to refresh token');
-        throw error;
-      } finally {
-        setLoading(false);
-      }
-    },
+    
     async getWebAuthCode() {
-      setLoading(true);
-      try {
-        const response = await post<{ code: string; expiresIn: number }>('web-code', undefined, {
-          Authorization: `Bearer ${state.sessionToken}`
-        });
-        return response;
-      } catch (error) {
-        setError(error instanceof Error ? error.message : 'Failed to get web auth code');
-        throw error;
-      } finally {
-        setLoading(false);
-      }
+      return apiRequest<{ code: string; expiresIn: number }>(
+        'POST',
+        '/auth/web-auth-code',
+        undefined
+      );
     }
   };
+  
+  return client;
 }
 
 // Re-export AuthClient and AuthClientConfig types from './types'

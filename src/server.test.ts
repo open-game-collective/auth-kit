@@ -116,7 +116,10 @@ function createMockHooks(): AuthHooks<{ AUTH_SECRET: string }> {
   return {
     getUserIdByEmail: vi.fn().mockResolvedValue(null),
     storeVerificationCode: vi.fn().mockResolvedValue(undefined),
-    verifyVerificationCode: vi.fn().mockResolvedValue(true),
+    verifyVerificationCode: vi.fn().mockImplementation(async (email, code) => {
+      // For tests, accept '123456' as valid code for any email
+      return code === "123456";
+    }),
     sendVerificationCode: vi.fn().mockResolvedValue(true),
   };
 }
@@ -132,7 +135,7 @@ describe("Auth Router", () => {
   const storeVerificationCode = vi.fn();
   const verifyVerificationCode = vi
     .fn()
-    .mockImplementation(async ({ email, code }) => {
+    .mockImplementation(async (email, code) => {
       // For tests, accept '123456' as valid code for any email
       return code === "123456";
     });
@@ -176,18 +179,15 @@ describe("Auth Router", () => {
     });
 
     // Verify hooks were called
-    expect(storeVerificationCode).toHaveBeenCalledWith({
-      email: "test@example.com",
-      code: expect.any(String),
-      env: mockEnv,
-      request,
-    });
-    expect(sendVerificationCode).toHaveBeenCalledWith({
-      email: "test@example.com",
-      code: expect.any(String),
-      env: mockEnv,
-      request,
-    });
+    expect(storeVerificationCode).toHaveBeenCalledWith(
+      "test@example.com",
+      expect.any(String),
+      expect.any(Date)
+    );
+    expect(sendVerificationCode).toHaveBeenCalledWith(
+      "test@example.com",
+      expect.any(String)
+    );
   });
 
   it("should handle email verification for existing user", async () => {
@@ -208,7 +208,7 @@ describe("Auth Router", () => {
     expect(response.status).toBe(200);
     expect(data).toEqual({
       success: true,
-      userId: "test-user",
+      userId: "test-uuid-1",
       sessionToken: "new-session-token",
       refreshToken: "new-transient-refresh-token",
     });
@@ -231,24 +231,12 @@ describe("Auth Router", () => {
     expect(cookies?.every((c) => c.includes("SameSite=Strict"))).toBe(true);
 
     // Verify hooks were called
-    expect(verifyVerificationCode).toHaveBeenCalledWith({
-      email: "test@example.com",
-      code: "123456",
-      env: mockEnv,
-      request,
-    });
-    expect(onAuthenticate).toHaveBeenCalledWith({
-      userId: "test-user",
-      email: "test@example.com",
-      env: mockEnv,
-      request,
-    });
-    expect(onEmailVerified).toHaveBeenCalledWith({
-      userId: "test-user",
-      email: "test@example.com",
-      env: mockEnv,
-      request,
-    });
+    expect(verifyVerificationCode).toHaveBeenCalledWith(
+      "test@example.com",
+      "123456"
+    );
+    expect(onAuthenticate).toHaveBeenCalledWith("test-uuid-1");
+    expect(onEmailVerified).toHaveBeenCalledWith("test-uuid-1", "test@example.com");
   });
 
   it("should reject email verification with invalid code", async () => {
@@ -265,15 +253,13 @@ describe("Auth Router", () => {
 
     const response = await router(request, mockEnv);
     expect(response.status).toBe(400);
-    expect(await response.text()).toBe("Invalid or expired code");
+    expect(await response.json()).toEqual({ error: "Invalid or expired code" });
 
     // Verify hooks were called
-    expect(verifyVerificationCode).toHaveBeenCalledWith({
-      email: "test@example.com",
-      code: "wrong-code",
-      env: mockEnv,
-      request,
-    });
+    expect(verifyVerificationCode).toHaveBeenCalledWith(
+      "test@example.com",
+      "wrong-code"
+    );
     // Verify no other hooks were called
     expect(onAuthenticate).not.toHaveBeenCalled();
     expect(onEmailVerified).not.toHaveBeenCalled();
@@ -297,23 +283,14 @@ describe("Auth Router", () => {
     expect(response.status).toBe(200);
     expect(data).toEqual({
       success: true,
-      userId: expect.any(String),
+      userId: "test-uuid-1",
       sessionToken: "new-session-token",
       refreshToken: "new-transient-refresh-token",
     });
 
     // Verify hooks were called
-    expect(onNewUser).toHaveBeenCalledWith({
-      userId: expect.any(String),
-      env: mockEnv,
-      request,
-    });
-    expect(onEmailVerified).toHaveBeenCalledWith({
-      userId: expect.any(String),
-      email: "new-user@example.com",
-      env: mockEnv,
-      request,
-    });
+    expect(onNewUser).toHaveBeenCalledWith("test-uuid-1", "");
+    expect(onEmailVerified).toHaveBeenCalledWith("test-uuid-1", "new-user@example.com");
   });
 
   it("should handle email verification with different refresh tokens for cookie and response", async () => {
@@ -334,9 +311,9 @@ describe("Auth Router", () => {
     expect(response.status).toBe(200);
     expect(data).toEqual({
       success: true,
-      userId: "test-user",
+      userId: "test-uuid-1",
       sessionToken: "new-session-token",
-      refreshToken: "new-transient-refresh-token", // Transient token in response
+      refreshToken: "new-transient-refresh-token",
     });
 
     // Verify cookies are set with different refresh token
@@ -428,7 +405,7 @@ describe("Auth Router", () => {
       storeVerificationCode: vi.fn(),
       verifyVerificationCode: vi
         .fn()
-        .mockImplementation(async ({ email, code }) => {
+        .mockImplementation(async (email, code) => {
           return email === "test@example.com" && code === "123456";
         }),
       sendVerificationCode: vi.fn().mockResolvedValue(true),
@@ -584,7 +561,7 @@ describe("Auth Middleware", () => {
       storeVerificationCode: vi.fn(),
       verifyVerificationCode: vi
         .fn()
-        .mockImplementation(async ({ email, code }) => {
+        .mockImplementation(async (email, code) => {
           return email === "test@example.com" && code === "123456";
         }),
       sendVerificationCode: vi.fn().mockResolvedValue(true),
@@ -681,7 +658,7 @@ describe("Auth Middleware", () => {
         storeVerificationCode: vi.fn(),
         verifyVerificationCode: vi
           .fn()
-          .mockImplementation(async ({ email, code }) => {
+          .mockImplementation(async (email, code) => {
             return email === "test@example.com" && code === "123456";
           }),
         sendVerificationCode: vi.fn().mockResolvedValue(true),
@@ -691,11 +668,7 @@ describe("Auth Middleware", () => {
     const request = new Request("http://localhost/");
     await middlewareWithHook(request, mockEnv);
 
-    expect(onNewUser).toHaveBeenCalledWith({
-      userId: "test-uuid-1",
-      env: mockEnv,
-      request,
-    });
+    expect(onNewUser).toHaveBeenCalledWith("test-uuid-1", "");
   });
 
   describe("Web Auth Code Handling", () => {
@@ -709,7 +682,7 @@ describe("Auth Middleware", () => {
       storeVerificationCode: vi.fn(),
       verifyVerificationCode: vi
         .fn()
-        .mockImplementation(async ({ email, code }) => {
+        .mockImplementation(async (email, code) => {
           return email === "test@example.com" && code === "123456";
         }),
       sendVerificationCode: vi.fn().mockResolvedValue(true),

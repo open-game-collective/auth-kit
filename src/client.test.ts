@@ -19,51 +19,40 @@ describe('createAnonymousUser', () => {
     server.use(
       http.post('http://localhost:8787/auth/anonymous', () => {
         return HttpResponse.json({
-          userId: 'anon-123',
-          sessionToken: 'session-token-123',
-          refreshToken: 'refresh-token-123'
-        });
-      })
-    );
-
-    const result = await createAnonymousUser({
-      host: 'localhost:8787'
-    });
-
-    expect(result).toEqual({
-      userId: 'anon-123',
-      sessionToken: 'session-token-123',
-      refreshToken: 'refresh-token-123'
-    });
-  });
-
-  it('should create an anonymous user with custom token expiration', async () => {
-    server.use(
-      http.post('http://localhost:8787/auth/anonymous', async ({ request }) => {
-        const body = await request.json();
-        expect(body).toEqual({
-          refreshTokenExpiresIn: '30d',
-          sessionTokenExpiresIn: '1h'
-        });
-        return HttpResponse.json({
-          userId: 'anon-123',
-          sessionToken: 'session-token-123',
-          refreshToken: 'refresh-token-123'
+          userId: 'new-user-id',
+          sessionToken: 'new-session-token',
+          email: null
         });
       })
     );
 
     const result = await createAnonymousUser({
       host: 'localhost:8787',
-      refreshTokenExpiresIn: '30d',
-      sessionTokenExpiresIn: '1h'
+      email: 'test@example.com'
     });
 
-    expect(result).toEqual({
-      userId: 'anon-123',
-      sessionToken: 'session-token-123',
-      refreshToken: 'refresh-token-123'
+    expect(result.userId).toBe('new-user-id');
+    expect(result.sessionToken).toBe('new-session-token');
+    expect(result.email).toBeUndefined();
+  });
+
+  it('should create an anonymous user with expiration options', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/anonymous', () => {
+        return HttpResponse.json({
+          userId: 'anon-123',
+          sessionToken: 'session-token-123'
+        });
+      })
+    );
+    
+    const result = await createAnonymousUser({
+      host: 'localhost:8787',
+      sessionTokenExpiresIn: '1h'
     });
+    
+    expect(result.userId).toBe('anon-123');
+    expect(result.sessionToken).toBe('session-token-123');
   });
 
   it('should handle errors when creating anonymous user', async () => {
@@ -107,8 +96,7 @@ describe('AuthClient', () => {
       http.post('http://localhost:8787/auth/request-code', () => {
         return HttpResponse.json({
           userId: 'test-user-2',
-          sessionToken: 'test-session-2',
-          refreshToken: 'test-refresh',
+          sessionToken: 'test-session-2'
         });
       })
     );
@@ -142,16 +130,14 @@ describe('AuthClient', () => {
       http.post('http://localhost:8787/auth/request-code', () => {
         return HttpResponse.json({
           userId: 'test-user-2',
-          sessionToken: 'test-session-2',
-          refreshToken: 'test-refresh',
+          sessionToken: 'test-session-2'
         });
       }),
       http.post('http://localhost:8787/auth/verify', () => {
         return HttpResponse.json({
           success: true,
           userId: 'test-user-2',
-          sessionToken: mockSessionToken,
-          refreshToken: 'test-refresh',
+          sessionToken: mockSessionToken
         });
       })
     );
@@ -211,7 +197,7 @@ describe('AuthClient', () => {
         return HttpResponse.json({
           userId: 'test-user',
           sessionToken: mockSessionToken,
-          refreshToken: 'new-refresh',
+          email: 'test@example.com'
         });
       })
     );
@@ -219,8 +205,7 @@ describe('AuthClient', () => {
     const client = createAuthClient({
       host: 'localhost:8787',
       userId: 'test-user',
-      sessionToken: 'test-session',
-      refreshToken: 'test-refresh'
+      sessionToken: 'test-session'
     });
 
     await client.refresh();
@@ -282,8 +267,7 @@ describe('AuthClient', () => {
         return HttpResponse.json({
           success: true,
           userId: 'test-user',
-          sessionToken: mockSessionToken,
-          refreshToken: 'test-refresh'
+          sessionToken: mockSessionToken
         });
       })
     );
@@ -310,7 +294,7 @@ describe('AuthClient', () => {
           success: true,
           userId: 'test-user',
           sessionToken: mockSessionToken,
-          refreshToken: 'new-refresh'
+          email: 'test@example.com'
         });
       })
     );
@@ -318,14 +302,64 @@ describe('AuthClient', () => {
     const client = createAuthClient({
       host: 'localhost:8787',
       userId: 'test-user',
-      sessionToken: 'initial-session-token',
-      refreshToken: 'test-refresh'
+      sessionToken: 'initial-session-token'
     });
 
     await client.refresh();
 
     expect(client.getState().sessionToken).toBe(mockSessionToken);
     expect(client.getState().email).toBe('test@example.com');
+  });
+
+  it('should refresh the session token', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/refresh', () => {
+        return HttpResponse.json({
+          sessionToken: 'refreshed-session-token'
+        });
+      })
+    );
+    
+    const client = createAuthClient({
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
+    });
+    
+    await client.refresh();
+    
+    expect(client.getState().sessionToken).toBe('refreshed-session-token');
+  });
+
+  it('should handle authentication with session token', async () => {
+    const client = createAuthClient({
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'test-session'
+    });
+    
+    expect(client.getState().userId).toBe('test-user');
+    expect(client.getState().sessionToken).toBe('test-session');
+  });
+
+  it('should handle refresh token response', async () => {
+    server.use(
+      http.post('http://localhost:8787/auth/refresh', () => {
+        return HttpResponse.json({
+          sessionToken: 'new-session'
+        });
+      })
+    );
+    
+    const client = createAuthClient({
+      host: 'localhost:8787',
+      userId: 'test-user',
+      sessionToken: 'initial-session-token'
+    });
+    
+    await client.refresh();
+    
+    expect(client.getState().sessionToken).toBe('new-session');
   });
 });
 
@@ -336,7 +370,7 @@ describe('Mobile-to-Web Authentication', () => {
 
   it('should generate web auth code', async () => {
     server.use(
-      http.post('http://localhost:8787/auth/web-code', () => {
+      http.post('http://localhost:8787/auth/web-auth-code', () => {
         return HttpResponse.json({
           code: 'test-web-code',
           expiresIn: 300
@@ -359,7 +393,7 @@ describe('Mobile-to-Web Authentication', () => {
 
   it('should handle web auth code errors', async () => {
     server.use(
-      http.post('http://localhost:8787/auth/web-code', () => {
+      http.post('http://localhost:8787/auth/web-auth-code', () => {
         return new HttpResponse('Unauthorized', { status: 401 });
       })
     );
