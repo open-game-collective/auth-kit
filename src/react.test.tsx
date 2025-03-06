@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
+import React from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAuthContext } from "./react";
 import { createAuthMockClient } from "./test";
-import React from "react";
 import type { AuthState } from "./types";
 
 describe("Auth React Integration", () => {

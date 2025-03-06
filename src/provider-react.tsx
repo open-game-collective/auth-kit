@@ -1,6 +1,6 @@
 import React from "react";
-import { ProviderAuthClient, ProviderAuthState, LinkedAccount } from "./types";
 import { useSyncExternalStoreWithSelector } from "./react";
+import { LinkedAccount, ProviderAuthClient, ProviderAuthState } from "./types";
 
 export function createProviderAuthContext() {
   const context = React.createContext<ProviderAuthClient | null>(null);
@@ -45,7 +45,7 @@ export function createProviderAuthContext() {
     const accounts = useSelector((state) => state.linkedAccounts);
     const requestState = useSelector(
       (state) =>
-        state.requests["getLinkedAccounts"] || {
+        state.requests.getLinkedAccounts || {
           isLoading: false,
           error: null,
           lastUpdated: null,
@@ -77,7 +77,7 @@ export function createProviderAuthContext() {
     const client = useClient();
     const requestState = useSelector(
       (state) =>
-        state.requests["initiateAccountLinking"] || {
+        state.requests.initiateAccountLinking || {
           isLoading: false,
           error: null,
           lastUpdated: null,
@@ -113,7 +113,7 @@ export function createProviderAuthContext() {
     const client = useClient();
     const requestState = useSelector(
       (state) =>
-        state.requests["unlinkAccount"] || {
+        state.requests.unlinkAccount || {
           isLoading: false,
           error: null,
           lastUpdated: null,
@@ -136,7 +136,9 @@ export function createProviderAuthContext() {
   }
 
   return {
-    Provider: context.Provider,
+    Provider: ({ client, children }: { client: ProviderAuthClient; children: React.ReactNode }) => (
+      <context.Provider value={client}>{children}</context.Provider>
+    ),
     useClient,
     useSelector,
     LinkedAccounts,
@@ -145,8 +147,4 @@ export function createProviderAuthContext() {
     InitiateLinking,
     UnlinkAccount,
   };
-}
-
-function defaultCompare<T>(a: T, b: T) {
-  return Object.is(a, b);
 }

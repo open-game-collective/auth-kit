@@ -2,10 +2,8 @@ import React, {
   createContext,
   memo,
   ReactNode,
-  useCallback,
   useContext,
   useMemo,
-  useSyncExternalStore,
   useEffect,
   useRef,
   useState,
@@ -102,7 +100,7 @@ function defaultCompare<T>(a: T, b: T) {
 export function useSyncExternalStoreWithSelector<Snapshot, Selection>(
   subscribe: (onStoreChange: () => void) => () => void,
   getSnapshot: () => Snapshot,
-  getServerSnapshot: undefined | null | (() => Snapshot),
+  _getServerSnapshot: undefined | null | (() => Snapshot),
   selector: (snapshot: Snapshot) => Selection,
   isEqual?: (a: Selection, b: Selection) => boolean
 ): Selection {

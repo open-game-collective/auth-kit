@@ -1,9 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act, fireEvent } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
+import React from "react";
+import { describe, expect, it } from "vitest";
 import { createProviderAuthContext } from "./provider-react";
 import { createProviderAuthMockClient } from "./test";
-import React from "react";
-import type { ProviderAuthState, LinkedAccount } from "./types";
 
 describe("Provider Auth Context", () => {
   describe("useClient", () => {
@@ -28,7 +27,7 @@ describe("Provider Auth Context", () => {
       };
 
       render(
-        <AuthContext.Provider value={mockClient}>
+        <AuthContext.Provider client={mockClient}>
           <TestComponent />
         </AuthContext.Provider>
       );
@@ -66,7 +65,7 @@ describe("Provider Auth Context", () => {
       };
 
       render(
-        <AuthContext.Provider value={mockClient}>
+        <AuthContext.Provider client={mockClient}>
           <TestComponent />
         </AuthContext.Provider>
       );
@@ -122,7 +121,7 @@ describe("Provider Auth Context", () => {
       };
 
       render(
-        <AuthContext.Provider value={mockClient}>
+        <AuthContext.Provider client={mockClient}>
           <TestComponent />
         </AuthContext.Provider>
       );
@@ -181,7 +180,7 @@ describe("Provider Auth Context", () => {
       const AuthContext = createProviderAuthContext();
 
       render(
-        <AuthContext.Provider value={mockClient}>
+        <AuthContext.Provider client={mockClient}>
           <AuthContext.LinkedAccountsList
             render={({ accounts, isLoading, error }) => (
               <div>

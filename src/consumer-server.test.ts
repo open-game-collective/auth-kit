@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createConsumerAuthRouter, ConsumerAuthHooks } from "./server";
 import * as jose from "jose";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ConsumerAuthHooks, createConsumerAuthRouter } from "./server";
 
 // Reset UUID counter before each test
 beforeEach(() => {
@@ -14,7 +14,7 @@ vi.stubGlobal("crypto", {
 });
 
 // Create a mock verifySession function
-const mockVerifySession = vi.fn();
+const _mockVerifySession = vi.fn();
 
 // Mock jose JWT functions
 vi.mock("jose", () => {
@@ -48,9 +48,7 @@ vi.mock("jose", () => {
   };
 
   return {
-    SignJWT: function (payload: Record<string, unknown>) {
-      return createMockJWT(payload);
-    },
+    SignJWT: (payload: Record<string, unknown>) => createMockJWT(payload),
     jwtVerify: async (token: string) => {
       if (token === "invalid-token") {
         throw new Error("Invalid token");
@@ -199,7 +197,7 @@ describe("Consumer Auth Router", () => {
           type: "link",
         },
         protectedHeader: { alg: "HS256" },
-      } as any);
+      } as unknown);
 
       const request = new Request("https://example.com/auth/verify-link", {
         method: "POST",
@@ -299,7 +297,7 @@ describe("Consumer Auth Router", () => {
           type: "link",
         },
         protectedHeader: { alg: "HS256" },
-      } as any);
+      } as unknown);
 
       const request = new Request("https://example.com/auth/confirm-link", {
         method: "POST",
@@ -391,7 +389,7 @@ describe("Consumer Auth Router", () => {
           type: "link",
         },
         protectedHeader: { alg: "HS256" },
-      } as any);
+      } as unknown);
 
       // Mock storeOpenGameLink to return false
       mockHooks.storeOpenGameLink = vi.fn().mockImplementation(async () => {

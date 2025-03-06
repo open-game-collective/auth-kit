@@ -1,17 +1,24 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createAuthRouter, withAuth, AuthHooks } from "./server";
+import { AuthHooks, createAuthRouter, withAuth } from "./server";
 
-const REFRESH_TOKEN_COOKIE = "auth_refresh_token";
+const _REFRESH_TOKEN_COOKIE = "auth_refresh_token";
+
+// Extend the NodeJS.Global interface to include our test cookie value
+declare global {
+  // Using var is required for global augmentation in TypeScript
+  // biome-ignore lint/style/noVar: Required for global augmentation
+  var __testCookieValue__: string | undefined;
+}
 
 // Reset UUID counter before each test
 beforeEach(() => {
-  uuidCounter = 0;
+  _uuidCounter = 0;
 });
 
 // Mock crypto for UUID generation
-let uuidCounter = 0;
+let _uuidCounter = 0;
 vi.stubGlobal("crypto", {
-  randomUUID: () => `test-uuid-1`, // Always return test-uuid-1 for consistent testing
+  randomUUID: () => "test-uuid-1", // Always return test-uuid-1 for consistent testing
 });
 
 // Mock jose JWT functions
@@ -106,7 +113,7 @@ function createMockHooks(): AuthHooks<{ AUTH_SECRET: string }> {
   return {
     getUserIdByEmail: vi.fn().mockResolvedValue(null),
     storeVerificationCode: vi.fn().mockResolvedValue(undefined),
-    verifyVerificationCode: vi.fn().mockImplementation(async (email, code) => {
+    verifyVerificationCode: vi.fn().mockImplementation(async (_email, code) => {
       // For tests, accept '123456' as valid code for any email
       return code === "123456";
     }),
@@ -123,7 +130,7 @@ describe("Auth Router", () => {
     return email === "test@example.com" ? "test-user" : null;
   });
   const storeVerificationCode = vi.fn();
-  const verifyVerificationCode = vi.fn().mockImplementation(async (email, code) => {
+  const verifyVerificationCode = vi.fn().mockImplementation(async (_email, code) => {
     // For tests, accept '123456' as valid code for any email
     return code === "123456";
   });
@@ -382,7 +389,9 @@ describe("Auth Router", () => {
     });
 
     beforeEach(() => {
-      Object.values(baseHooks).forEach((mock) => mock.mockClear?.());
+      for (const mock of Object.values(baseHooks)) {
+        mock.mockClear?.();
+      }
     });
 
     it("should generate web auth code with valid session token", async () => {
@@ -498,8 +507,8 @@ describe("Auth Middleware", () => {
   const originalHeadersGet = Headers.prototype.get;
   beforeAll(() => {
     Headers.prototype.get = function (key: string) {
-      if (key.toLowerCase() === "cookie" && (global as any).__testCookieValue__) {
-        return (global as any).__testCookieValue__;
+      if (key.toLowerCase() === "cookie" && global.__testCookieValue__) {
+        return global.__testCookieValue__;
       }
       return originalHeadersGet.call(this, key);
     };
@@ -526,7 +535,7 @@ describe("Auth Middleware", () => {
   });
 
   beforeEach(() => {
-    (global as any).__testCookieValue__ = undefined;
+    global.__testCookieValue__ = undefined;
     mockHandler.mockClear();
   });
 
@@ -548,7 +557,7 @@ describe("Auth Middleware", () => {
   });
 
   it("should use existing session if valid", async () => {
-    (global as any).__testCookieValue__ = "auth_session_token=valid-session-token";
+    global.__testCookieValue__ = "auth_session_token=valid-session-token";
     const request = new Request("http://localhost/");
 
     await middleware(request, mockEnv);
@@ -561,7 +570,7 @@ describe("Auth Middleware", () => {
   });
 
   it("should refresh session if expired but has valid refresh token", async () => {
-    (global as any).__testCookieValue__ =
+    global.__testCookieValue__ =
       "auth_session_token=invalid-token; auth_refresh_token=valid-refresh-token";
     const request = new Request("http://localhost/");
 
@@ -580,7 +589,7 @@ describe("Auth Middleware", () => {
   });
 
   it("should create new anonymous user if all tokens are invalid", async () => {
-    (global as any).__testCookieValue__ =
+    global.__testCookieValue__ =
       "auth_session_token=invalid-token; auth_refresh_token=invalid-token";
     const request = new Request("http://localhost/");
 
@@ -642,11 +651,13 @@ describe("Auth Middleware", () => {
     });
 
     beforeEach(() => {
-      Object.values(baseHooks).forEach((mock) => mock.mockClear?.());
+      for (const mock of Object.values(baseHooks)) {
+        mock.mockClear?.();
+      }
     });
 
     it("should handle valid web auth code and maintain user identity", async () => {
-      const request = new Request(`http://localhost/?code=test-web-code`);
+      const request = new Request("http://localhost/?code=test-web-code");
       const response = await middlewareWithWebHooks(request, mockEnv);
 
       // Should redirect to remove code from URL
@@ -661,7 +672,7 @@ describe("Auth Middleware", () => {
     });
 
     it("should preserve other query parameters when redirecting", async () => {
-      const request = new Request(`http://localhost/?code=test-web-code&other=param`);
+      const request = new Request("http://localhost/?code=test-web-code&other=param");
       const response = await middlewareWithWebHooks(request, mockEnv);
 
       expect(response.status).toBe(302);
@@ -669,7 +680,7 @@ describe("Auth Middleware", () => {
     });
 
     it("should handle web auth code on any path", async () => {
-      const request = new Request(`http://localhost/some/path?code=test-web-code`);
+      const request = new Request("http://localhost/some/path?code=test-web-code");
       const response = await middlewareWithWebHooks(request, mockEnv);
 
       expect(response.status).toBe(302);
@@ -677,7 +688,7 @@ describe("Auth Middleware", () => {
     });
 
     it("should fall back to anonymous user if web auth code is invalid", async () => {
-      const request = new Request(`http://localhost/?code=invalid-token`);
+      const request = new Request("http://localhost/?code=invalid-token");
       const response = await middlewareWithWebHooks(request, mockEnv);
 
       // Should proceed with normal auth flow (creating anonymous user)
@@ -797,7 +808,7 @@ describe("Cookie Domain Option", () => {
   it("should set cookies with top-level domain in withAuth middleware when useTopLevelDomain is true", async () => {
     const mockHooks = createMockHooks();
     const handler = withAuth(
-      async (request, env, { userId }) => {
+      async (_request, _env, { userId: _userId }) => {
         return new Response("OK");
       },
       {

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createProviderAuthRouter } from "./server";
 import type { LinkedAccount, ProviderAuthHooks } from "./types";
 
@@ -16,23 +16,15 @@ vi.stubGlobal("crypto", {
 // Mock jose JWT functions
 vi.mock("jose", () => {
   return {
-    SignJWT: vi.fn().mockImplementation((payload) => {
+    SignJWT: vi.fn().mockImplementation((_payload) => {
       return {
-        setProtectedHeader: function () {
-          return {
-            setIssuedAt: function () {
-              return {
-                setExpirationTime: function () {
-                  return {
-                    sign: function () {
-                      return Promise.resolve("mock-link-token");
-                    },
-                  };
-                },
-              };
-            },
-          };
-        },
+        setProtectedHeader: () => ({
+          setIssuedAt: () => ({
+            setExpirationTime: () => ({
+              sign: () => Promise.resolve("mock-link-token"),
+            }),
+          }),
+        }),
       };
     }),
     jwtVerify: vi.fn().mockImplementation((token) => {
@@ -45,9 +37,8 @@ vi.mock("jose", () => {
           },
           protectedHeader: { alg: "HS256" },
         });
-      } else {
-        return Promise.reject(new Error("Invalid token"));
       }
+      return Promise.reject(new Error("Invalid token"));
     }),
   };
 });
@@ -62,7 +53,7 @@ const mockSign = (payload: Record<string, unknown>) => {
 };
 
 // Create a mock JWT token for testing
-const createMockJWT = (payload: Record<string, unknown>) => {
+const _createMockJWT = (payload: Record<string, unknown>) => {
   return mockSign(payload);
 };
 
@@ -77,15 +68,15 @@ function createMockProviderHooks(): ProviderAuthHooks {
       return null;
     }),
 
-    storeVerificationCode: vi.fn(async (email: string, code: string, expiresAt: Date) => {
+    storeVerificationCode: vi.fn(async (_email: string, _code: string, _expiresAt: Date) => {
       // Mock implementation
     }),
 
-    verifyVerificationCode: vi.fn(async (email: string, code: string) => {
+    verifyVerificationCode: vi.fn(async (_email: string, code: string) => {
       return code === "123456";
     }),
 
-    sendVerificationCode: vi.fn(async (email: string, code: string) => {
+    sendVerificationCode: vi.fn(async (_email: string, _code: string) => {
       // Mock implementation
     }),
 
@@ -97,11 +88,13 @@ function createMockProviderHooks(): ProviderAuthHooks {
       return null;
     }),
 
-    storeAccountLink: vi.fn(async (openGameUserId: string, gameId: string, gameUserId: string) => {
-      // Mock implementation
-    }),
+    storeAccountLink: vi.fn(
+      async (_openGameUserId: string, _gameId: string, _gameUserId: string) => {
+        // Mock implementation
+      }
+    ),
 
-    getLinkedAccounts: vi.fn(async (openGameUserId: string) => {
+    getLinkedAccounts: vi.fn(async (_openGameUserId: string) => {
       return [
         {
           gameId: "test-game",
@@ -111,7 +104,7 @@ function createMockProviderHooks(): ProviderAuthHooks {
       ] as LinkedAccount[];
     }),
 
-    removeAccountLink: vi.fn(async (openGameUserId: string, gameId: string) => {
+    removeAccountLink: vi.fn(async (_openGameUserId: string, gameId: string) => {
       return gameId === "test-game";
     }),
   };
@@ -382,9 +375,8 @@ describe("Provider Auth Router", () => {
                 },
                 protectedHeader: { alg: "HS256" },
               });
-            } else {
-              return Promise.reject(new Error("Invalid token"));
             }
+            return Promise.reject(new Error("Invalid token"));
           }),
         };
       });
@@ -473,16 +465,15 @@ describe("Provider Auth Router", () => {
           jwtVerify: vi.fn().mockImplementation((token) => {
             if (token === "invalid-token") {
               return Promise.reject(new Error("Invalid token"));
-            } else {
-              return Promise.resolve({
-                payload: {
-                  openGameUserId: "test-user-id",
-                  email: "test@example.com",
-                  type: "link",
-                },
-                protectedHeader: { alg: "HS256" },
-              });
             }
+            return Promise.resolve({
+              payload: {
+                openGameUserId: "test-user-id",
+                email: "test@example.com",
+                type: "link",
+              },
+              protectedHeader: { alg: "HS256" },
+            });
           }),
         };
       });
@@ -549,7 +540,7 @@ describe("Provider Auth Router", () => {
 
     it("should return 404 for non-existent gameId", async () => {
       // Mock removeAccountLink to return false for non-existent gameId
-      mockHooks.removeAccountLink = vi.fn(async (openGameUserId: string, gameId: string) => {
+      mockHooks.removeAccountLink = vi.fn(async (_openGameUserId: string, gameId: string) => {
         return gameId === "test-game";
       });
 

@@ -1,5 +1,5 @@
 import { SignJWT, jwtVerify } from "jose";
-import type { AuthHooks, ProviderAuthHooks, ConsumerAuthHooks } from "./types";
+import type { AuthHooks, ConsumerAuthHooks, ProviderAuthHooks } from "./types";
 
 const SESSION_TOKEN_COOKIE = "auth_session_token";
 const REFRESH_TOKEN_COOKIE = "auth_refresh_token";
@@ -14,7 +14,7 @@ interface TokenPayload {
 async function createSessionToken(
   userId: string,
   secret: string,
-  expiresIn: string = "15m",
+  expiresIn = "15m",
   email?: string
 ): Promise<string> {
   const sessionId = crypto.randomUUID();
@@ -38,8 +38,8 @@ async function createSessionToken(
 async function createRefreshToken(
   userId: string,
   secret: string,
-  expiresIn: string = "7d",
-  isTransient: boolean = false
+  expiresIn = "7d",
+  isTransient = false
 ): Promise<string> {
   return await new SignJWT({ userId })
     .setProtectedHeader({ alg: "HS256" })
@@ -66,7 +66,7 @@ async function verifyToken(token: string, secret: string): Promise<TokenPayload 
       return null;
     }
     return payload;
-  } catch (error) {
+  } catch (_error) {
     return null;
   }
 }
@@ -105,9 +105,9 @@ function generateVerificationCode(): string {
 function createCookieString(
   name: string,
   value: string,
-  options: string = "",
+  options = "",
   request?: Request,
-  useTopLevelDomain: boolean = false
+  useTopLevelDomain = false
 ): string {
   let cookieString = `${name}=${value}; HttpOnly; Secure; SameSite=Strict; Path=/`;
 
@@ -126,7 +126,7 @@ function createCookieString(
       if (parts.length > 1) {
         // Get the top-level domain with one subdomain level
         // For example: from "api.example.com" get ".example.com"
-        const domain = "." + parts.slice(-2).join(".");
+        const domain = `.${parts.slice(-2).join(".")}`;
         cookieString += `; Domain=${domain}`;
       }
     }
@@ -354,7 +354,7 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
           const cookieRefreshToken = getCookie(request, REFRESH_TOKEN_COOKIE);
 
           // Try Authorization header first (for JS/RN clients), then cookie
-          let refreshToken = authHeader?.startsWith("Bearer ")
+          const refreshToken = authHeader?.startsWith("Bearer ")
             ? authHeader.slice(7)
             : cookieRefreshToken;
 
@@ -497,7 +497,7 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
         default:
           return new Response("Not found", { status: 404 });
       }
-    } catch (error) {
+    } catch (_error) {
       return new Response(JSON.stringify({ error: "Internal server error" }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
@@ -542,7 +542,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
         }
 
         // Create new session for the web client
-        const sessionId = crypto.randomUUID();
+        const _sessionId = crypto.randomUUID();
 
         // Use email from the web auth code if available
         const newSessionToken = await createSessionToken(
@@ -707,7 +707,7 @@ function verifySession(request: Request): { userId: string } | null {
   const authHeader = request.headers.get("Authorization");
   let token: string | undefined;
 
-  if (authHeader && authHeader.startsWith("Bearer ")) {
+  if (authHeader?.startsWith("Bearer ")) {
     token = authHeader.split(" ")[1];
   }
 
@@ -731,7 +731,7 @@ function verifySession(request: Request): { userId: string } | null {
     // This is a simplified example - in production, you should properly verify the token
     const payload = JSON.parse(atob(token.split(".")[1]));
     return { userId: payload.sub || payload.userId };
-  } catch (error) {
+  } catch (_error) {
     return null;
   }
 }
@@ -872,7 +872,7 @@ export function createProviderAuthRouter(hooks: ProviderAuthHooks) {
               headers: { "Content-Type": "application/json" },
             }
           );
-        } catch (error) {
+        } catch (_error) {
           return new Response(JSON.stringify({ valid: false }), {
             status: 200,
             headers: { "Content-Type": "application/json" },
@@ -939,7 +939,7 @@ export function createProviderAuthRouter(hooks: ProviderAuthHooks) {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
-        } catch (error) {
+        } catch (_error) {
           return new Response(JSON.stringify({ error: "Invalid token" }), {
             status: 400,
             headers: { "Content-Type": "application/json" },
@@ -1104,7 +1104,7 @@ export function createConsumerAuthRouter(hooks: ConsumerAuthHooks) {
               headers: { "Content-Type": "application/json" },
             }
           );
-        } catch (error) {
+        } catch (_error) {
           return new Response(JSON.stringify({ valid: false }), {
             status: 200,
             headers: { "Content-Type": "application/json" },
@@ -1165,7 +1165,7 @@ export function createConsumerAuthRouter(hooks: ConsumerAuthHooks) {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
-        } catch (error) {
+        } catch (_error) {
           return new Response(JSON.stringify({ error: "Invalid token" }), {
             status: 400,
             headers: { "Content-Type": "application/json" },

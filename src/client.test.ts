@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createAuthClient, createAnonymousUser } from "./client";
 import { http, HttpResponse } from "msw";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createAnonymousUser, createAuthClient } from "./client";
 import { server } from "./test/setup";
+import { AuthState } from "./types";
 
 // Declare window.location as mutable for tests
 declare global {
@@ -109,7 +110,7 @@ describe("AuthClient", () => {
       sessionToken: "test-session",
     });
 
-    const states: any[] = [];
+    const states: AuthState[] = [];
     client.subscribe((state) => states.push(state));
 
     await client.requestCode("test@example.com");

@@ -36,14 +36,16 @@ export function createConsumerAuthClient(config: ConsumerAuthClientConfig): Cons
     const newState = { ...state };
     updater(newState);
     state = newState;
-    subscribers.forEach((callback) => callback(state));
+    for (const callback of subscribers) {
+      callback(state);
+    }
   };
 
   // API request helper
   const apiRequest = async <T>(
     method: string,
     path: string,
-    body?: any,
+    body?: Record<string, unknown>,
     requestId?: string
   ): Promise<T> => {
     // Add protocol if not present
@@ -163,7 +165,7 @@ export function createConsumerAuthClient(config: ConsumerAuthClientConfig): Cons
       if (result.isLinked && result.openGameUserId) {
         setState((draft) => {
           draft.openGameLink = {
-            openGameUserId: result.openGameUserId!,
+            openGameUserId: result.openGameUserId || "",
             linkedAt: result.linkedAt || new Date().toISOString(),
             profile: result.profile,
           };
@@ -175,13 +177,12 @@ export function createConsumerAuthClient(config: ConsumerAuthClientConfig): Cons
           linkedAt: result.linkedAt || new Date().toISOString(),
           profile: result.profile,
         };
-      } else {
-        setState((draft) => {
-          draft.openGameLink = undefined;
-        });
-
-        return { isLinked: false };
       }
+      setState((draft) => {
+        draft.openGameLink = undefined;
+      });
+
+      return { isLinked: false };
     },
 
     async verifyLinkToken(token: string) {
@@ -199,9 +200,8 @@ export function createConsumerAuthClient(config: ConsumerAuthClientConfig): Cons
           openGameUserId: result.openGameUserId,
           email: result.email,
         };
-      } else {
-        return { valid: false };
       }
+      return { valid: false };
     },
 
     async confirmLink(token: string, gameUserId: string) {
@@ -217,7 +217,7 @@ export function createConsumerAuthClient(config: ConsumerAuthClientConfig): Cons
         if (result.success && result.openGameUserId) {
           setState((draft) => {
             draft.openGameLink = {
-              openGameUserId: result.openGameUserId!,
+              openGameUserId: result.openGameUserId || "",
               linkedAt: result.linkedAt || new Date().toISOString(),
             };
           });

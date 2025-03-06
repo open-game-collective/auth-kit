@@ -1,11 +1,10 @@
 import {
   AuthClient,
   AuthState,
-  ProviderAuthClient,
-  ProviderAuthState,
   ConsumerAuthClient,
   ConsumerAuthState,
-  LinkedAccount,
+  ProviderAuthClient,
+  ProviderAuthState,
 } from "./types";
 
 /**
@@ -40,7 +39,9 @@ export function createAuthMockClient(config: {
     const newState = { ...state };
     recipe(newState);
     state = newState;
-    subscribers.forEach((callback) => callback(state));
+    for (const callback of subscribers) {
+      callback(state);
+    }
   };
 
   // Mock client
@@ -58,7 +59,7 @@ export function createAuthMockClient(config: {
         }
       };
     },
-    async requestCode(email: string) {
+    async requestCode(_email: string) {
       produce((draft) => {
         draft.isLoading = true;
         draft.error = null;
@@ -86,13 +87,12 @@ export function createAuthMockClient(config: {
           draft.email = email;
         });
         return { success: true };
-      } else {
-        produce((draft) => {
-          draft.isLoading = false;
-          draft.error = "Invalid verification code";
-        });
-        return { success: false };
       }
+      produce((draft) => {
+        draft.isLoading = false;
+        draft.error = "Invalid verification code";
+      });
+      return { success: false };
     },
     async logout() {
       produce((draft) => {
@@ -175,7 +175,9 @@ export function createProviderAuthMockClient(config: {
     const newState = { ...state };
     recipe(newState);
     state = newState;
-    subscribers.forEach((callback) => callback(state));
+    for (const callback of subscribers) {
+      callback(state);
+    }
   };
 
   // Create base client
@@ -326,7 +328,9 @@ export function createConsumerAuthMockClient(config: {
     const newState = { ...state };
     recipe(newState);
     state = newState;
-    subscribers.forEach((callback) => callback(state));
+    for (const callback of subscribers) {
+      callback(state);
+    }
   };
 
   // Create base client
@@ -383,9 +387,8 @@ export function createConsumerAuthMockClient(config: {
           linkedAt: state.openGameLink.linkedAt,
           profile: state.openGameLink.profile,
         };
-      } else {
-        return { isLinked: false };
       }
+      return { isLinked: false };
     },
     async verifyLinkToken(token: string) {
       produce((draft) => {
@@ -420,11 +423,10 @@ export function createConsumerAuthMockClient(config: {
           openGameUserId: "og-user-123",
           email: "user@example.com",
         };
-      } else {
-        return { valid: false };
       }
+      return { valid: false };
     },
-    async confirmLink(token: string, gameUserId: string) {
+    async confirmLink(token: string, _gameUserId: string) {
       produce((draft) => {
         draft.requests = {
           ...draft.requests,
@@ -458,20 +460,19 @@ export function createConsumerAuthMockClient(config: {
         });
 
         return true;
-      } else {
-        produce((draft) => {
-          draft.requests = {
-            ...draft.requests,
-            confirmLink: {
-              isLoading: false,
-              error: "Invalid token",
-              lastUpdated: new Date().toISOString(),
-            },
-          };
-        });
-
-        throw new Error("Invalid token");
       }
+      produce((draft) => {
+        draft.requests = {
+          ...draft.requests,
+          confirmLink: {
+            isLoading: false,
+            error: "Invalid token",
+            lastUpdated: new Date().toISOString(),
+          },
+        };
+      });
+
+      throw new Error("Invalid token");
     },
     produce,
   };

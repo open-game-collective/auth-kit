@@ -1,9 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act, fireEvent } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
+import React from "react";
+import { describe, expect, it } from "vitest";
 import { createConsumerAuthContext } from "./consumer-react";
 import { createConsumerAuthMockClient } from "./test";
-import React from "react";
-import type { ConsumerAuthState, OpenGameLink } from "./types";
 
 describe("Consumer Auth Context", () => {
   describe("useClient", () => {

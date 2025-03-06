@@ -1,8 +1,7 @@
-import { describe, it, expect, beforeEach, vi, afterEach, afterAll } from "vitest";
-import { createConsumerAuthClient } from "./consumer-client";
-import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
-import { ConsumerAuthState, OpenGameLink } from "./types";
+import { setupServer } from "msw/node";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createConsumerAuthClient } from "./consumer-client";
 
 describe("Consumer Auth Client", () => {
   // Mock server setup

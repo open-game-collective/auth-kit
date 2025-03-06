@@ -32,7 +32,7 @@ export interface AuthClient {
 }
 
 // Base auth hooks interface
-export interface AuthHooks<TEnv = any> {
+export interface AuthHooks<_TEnv = unknown> {
   // Base auth hooks (required)
   getUserIdByEmail(email: string): Promise<string | null>;
   storeVerificationCode(email: string, code: string, expiresAt: Date): Promise<void>;

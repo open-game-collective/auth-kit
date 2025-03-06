@@ -1,4 +1,4 @@
-import { ProviderAuthClient, ProviderAuthState, LinkedAccount, RequestsState } from "./types";
+import { LinkedAccount, ProviderAuthClient, ProviderAuthState } from "./types";
 
 interface ProviderAuthClientConfig {
   host: string;
@@ -36,14 +36,16 @@ export function createProviderAuthClient(config: ProviderAuthClientConfig): Prov
     const newState = { ...state };
     updater(newState);
     state = newState;
-    subscribers.forEach((callback) => callback(state));
+    for (const callback of subscribers) {
+      callback(state);
+    }
   };
 
   // API request helper
   const apiRequest = async <T>(
     method: string,
     path: string,
-    body?: any,
+    body?: Record<string, unknown>,
     requestId?: string
   ): Promise<T> => {
     // Ensure the host has a protocol
@@ -196,7 +198,7 @@ export function createProviderAuthClient(config: ProviderAuthClientConfig): Prov
         });
 
         return true;
-      } catch (error) {
+      } catch (_error) {
         return false;
       }
     },

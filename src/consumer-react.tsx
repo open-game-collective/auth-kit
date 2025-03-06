@@ -1,6 +1,6 @@
 import React from "react";
-import { ConsumerAuthClient, ConsumerAuthState } from "./types";
 import { useSyncExternalStoreWithSelector } from "./react";
+import { ConsumerAuthClient, ConsumerAuthState } from "./types";
 
 export function createConsumerAuthContext() {
   const context = React.createContext<ConsumerAuthClient | null>(null);
@@ -37,7 +37,7 @@ export function createConsumerAuthContext() {
     render,
   }: {
     render: (props: {
-      profile: Record<string, any> | undefined;
+      profile: Record<string, unknown> | undefined;
       isLoading: boolean;
       error: string | null;
     }) => React.ReactNode;
@@ -45,7 +45,7 @@ export function createConsumerAuthContext() {
     const openGameLink = useSelector((state) => state.openGameLink);
     const requestState = useSelector(
       (state) =>
-        state.requests["getOpenGameLinkStatus"] || {
+        state.requests.getOpenGameLinkStatus || {
           isLoading: false,
           error: null,
           lastUpdated: null,
@@ -194,8 +194,4 @@ export function createConsumerAuthContext() {
     VerifyLinkToken,
     ConfirmLink,
   };
-}
-
-function defaultCompare<T>(a: T, b: T) {
-  return Object.is(a, b);
 }

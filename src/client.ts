@@ -1,12 +1,12 @@
 import { APIError, AuthClient, AuthState, STORAGE_KEYS, UserCredentials } from "./types";
-import type { AuthClientConfig, AnonymousUserConfig } from "./types";
+import type { AnonymousUserConfig, AuthClientConfig } from "./types";
 
 /**
- * Decodes a JWT token without verification
- * This is safe for client-side use since we're only reading the payload
+ * Simple JWT decoder for client-side use
+ * This is for convenience only and should not be used for security-critical operations
  * and not relying on the token's integrity for security purposes
  */
-function decodeJWT(token: string): Record<string, any> | null {
+export function decodeJWT(token: string): Record<string, unknown> | null {
   try {
     // Check if token is valid
     if (!token || typeof token !== "string") {
@@ -53,7 +53,9 @@ function decodeJWT(token: string): Record<string, any> | null {
         throw new Error("Invalid base64 string");
       }
 
-      for (let bc = 0, bs = 0, buffer, i = 0; (buffer = str.charAt(i++)); ) {
+      for (let bc = 0, bs = 0, i = 0; i < str.length; i++) {
+        const buffer = str.charAt(i);
+        if (!buffer) break;
         // Check if the character exists in the base64 character set
         const idx = chars.indexOf(buffer);
         if (idx === -1) continue;
@@ -131,15 +133,17 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     const nextState = { ...state };
     updater(nextState);
     state = nextState;
-    subscribers.forEach((callback) => callback(state));
+    for (const callback of subscribers) {
+      callback(state);
+    }
   };
 
   // Create API request helper
   const apiRequest = async <T>(
     method: string,
     path: string,
-    body?: any,
-    authenticated: boolean = true
+    body?: unknown,
+    authenticated = true
   ): Promise<T> => {
     setState((draft) => {
       draft.isLoading = true;
@@ -148,12 +152,13 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
 
     try {
       // Ensure we're working with a string path
+      let pathToUse = path;
       if (typeof path !== "string") {
-        path = String(path);
+        pathToUse = String(path);
       }
 
       // Normalize the path to ensure it starts with a slash
-      const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+      const normalizedPath = pathToUse.startsWith("/") ? pathToUse : `/${pathToUse}`;
 
       // Ensure the host is properly formatted
       const host = config.host.replace(/^https?:\/\//, "");
@@ -166,7 +171,7 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       };
 
       if (authenticated && state.sessionToken) {
-        headers["Authorization"] = `Bearer ${state.sessionToken}`;
+        headers.Authorization = `Bearer ${state.sessionToken}`;
       }
 
       const response = await fetch(url, {

@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, vi, afterEach, afterAll } from "vitest";
-import { createProviderAuthClient } from "./provider-client";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import type { LinkedAccount, ProviderAuthState } from "./types";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createProviderAuthClient } from "./provider-client";
+import type { ProviderAuthState } from "./types";
 
 describe("Provider Auth Client", () => {
   // Mock server setup

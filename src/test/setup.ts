@@ -1,6 +1,6 @@
-import { afterAll, afterEach, beforeAll } from "vitest";
-import { setupServer } from "msw/node";
 import "@testing-library/jest-dom";
+import { setupServer } from "msw/node";
+import { afterAll, afterEach, beforeAll } from "vitest";
 
 // Create a pristine server instance for each test file
 export const server = setupServer();
