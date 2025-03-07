@@ -1,3 +1,4 @@
+import { SignJWT } from "jose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createProviderAuthRouter } from "./server";
 import type { LinkedAccount, ProviderAuthHooks } from "./types";
@@ -572,7 +573,7 @@ describe("Provider Auth Router", () => {
 
 // Mock the createLinkToken function
 vi.mock("./server", async (importOriginal) => {
-  const originalModule = await importOriginal();
+  const originalModule = (await importOriginal()) as Record<string, unknown>;
   return {
     ...originalModule,
     createLinkToken: vi.fn().mockResolvedValue("mock-link-token"),

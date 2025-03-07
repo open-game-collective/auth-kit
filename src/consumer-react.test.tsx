@@ -175,8 +175,10 @@ describe("Consumer Auth Context", () => {
               <div>
                 <div data-testid="loading">{isLoading ? "Loading" : "Not Loading"}</div>
                 <div data-testid="error">{error || "No Error"}</div>
-                <div data-testid="display-name">{profile?.displayName || "No Name"}</div>
-                <div data-testid="avatar-url">{profile?.avatarUrl || "No Avatar"}</div>
+                <div data-testid="display-name">
+                  {(profile?.displayName as string) ?? "No Name"}
+                </div>
+                <div data-testid="avatar-url">{(profile?.avatarUrl as string) ?? "No Avatar"}</div>
               </div>
             )}
           />

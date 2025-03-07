@@ -197,7 +197,8 @@ describe("Consumer Auth Router", () => {
           type: "link",
         },
         protectedHeader: { alg: "HS256" },
-      } as unknown);
+        key: new TextEncoder().encode("test-key") as unknown as jose.KeyLike,
+      } as jose.JWTVerifyResult<unknown> & jose.ResolvedKey<jose.KeyLike>);
 
       const request = new Request("https://example.com/auth/verify-link", {
         method: "POST",
@@ -297,7 +298,8 @@ describe("Consumer Auth Router", () => {
           type: "link",
         },
         protectedHeader: { alg: "HS256" },
-      } as unknown);
+        key: new TextEncoder().encode("test-key") as unknown as jose.KeyLike,
+      } as jose.JWTVerifyResult<unknown> & jose.ResolvedKey<jose.KeyLike>);
 
       const request = new Request("https://example.com/auth/confirm-link", {
         method: "POST",
@@ -389,7 +391,8 @@ describe("Consumer Auth Router", () => {
           type: "link",
         },
         protectedHeader: { alg: "HS256" },
-      } as unknown);
+        key: new TextEncoder().encode("test-key") as unknown as jose.KeyLike,
+      } as jose.JWTVerifyResult<unknown> & jose.ResolvedKey<jose.KeyLike>);
 
       // Mock storeOpenGameLink to return false
       mockHooks.storeOpenGameLink = vi.fn().mockImplementation(async () => {
