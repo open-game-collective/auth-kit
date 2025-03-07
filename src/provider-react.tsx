@@ -34,9 +34,9 @@ export function createProviderAuthContext() {
   }
 
   function LinkedAccountsList({
-    render,
+    children,
   }: {
-    render: (props: {
+    children: (props: {
       accounts: LinkedAccount[];
       isLoading: boolean;
       error: string | null;
@@ -54,7 +54,7 @@ export function createProviderAuthContext() {
 
     return (
       <>
-        {render({
+        {children({
           accounts,
           isLoading: requestState.isLoading,
           error: requestState.error,
@@ -65,10 +65,10 @@ export function createProviderAuthContext() {
 
   function InitiateLinking({
     gameId,
-    render,
+    children,
   }: {
     gameId: string;
-    render: (props: {
+    children: (props: {
       onInitiate: () => Promise<{ linkToken: string; expiresAt: string }>;
       isInitiating: boolean;
       error: string | null;
@@ -90,7 +90,7 @@ export function createProviderAuthContext() {
 
     return (
       <>
-        {render({
+        {children({
           onInitiate,
           isInitiating: requestState.isLoading,
           error: requestState.error,
@@ -101,10 +101,10 @@ export function createProviderAuthContext() {
 
   function UnlinkAccount({
     gameId,
-    render,
+    children,
   }: {
     gameId: string;
-    render: (props: {
+    children: (props: {
       onUnlink: () => Promise<boolean>;
       isUnlinking: boolean;
       error: string | null;
@@ -126,7 +126,7 @@ export function createProviderAuthContext() {
 
     return (
       <>
-        {render({
+        {children({
           onUnlink,
           isUnlinking: requestState.isLoading,
           error: requestState.error,

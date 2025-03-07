@@ -34,9 +34,9 @@ export function createConsumerAuthContext() {
   }
 
   function OpenGameProfile({
-    render,
+    children,
   }: {
-    render: (props: {
+    children: (props: {
       profile: Record<string, unknown> | undefined;
       isLoading: boolean;
       error: string | null;
@@ -54,7 +54,7 @@ export function createConsumerAuthContext() {
 
     return (
       <>
-        {render({
+        {children({
           profile: openGameLink?.profile,
           isLoading: requestState.isLoading,
           error: requestState.error,
@@ -65,10 +65,10 @@ export function createConsumerAuthContext() {
 
   function VerifyLinkToken({
     token,
-    render,
+    children,
   }: {
     token: string;
-    render: (props: {
+    children: (props: {
       isVerifying: boolean;
       isValid: boolean;
       openGameUserId?: string;
@@ -122,17 +122,17 @@ export function createConsumerAuthContext() {
       verifyToken();
     }, [client, token]);
 
-    return <>{render(state)}</>;
+    return <>{children(state)}</>;
   }
 
   function ConfirmLink({
     token,
     gameUserId,
-    render,
+    children,
   }: {
     token: string;
     gameUserId: string;
-    render: (props: {
+    children: (props: {
       onConfirm: () => Promise<boolean>;
       isConfirming: boolean;
       isConfirmed: boolean;
@@ -174,7 +174,7 @@ export function createConsumerAuthContext() {
 
     return (
       <>
-        {render({
+        {children({
           onConfirm,
           isConfirming: state.isConfirming,
           isConfirmed: state.isConfirmed,

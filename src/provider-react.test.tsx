@@ -181,8 +181,8 @@ describe("Provider Auth Context", () => {
 
       render(
         <AuthContext.Provider client={mockClient}>
-          <AuthContext.LinkedAccountsList
-            render={({ accounts, isLoading, error }) => (
+          <AuthContext.LinkedAccountsList>
+            {({ accounts, isLoading, error }) => (
               <div>
                 <div data-testid="loading">{isLoading ? "Loading" : "Not Loading"}</div>
                 <div data-testid="error">{error || "No Error"}</div>
@@ -194,7 +194,7 @@ describe("Provider Auth Context", () => {
                 ))}
               </div>
             )}
-          />
+          </AuthContext.LinkedAccountsList>
         </AuthContext.Provider>
       );
 

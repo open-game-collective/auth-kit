@@ -6,6 +6,12 @@ A headless, isomorphic authentication toolkit that runs seamlessly across server
 
 - [Installation](#installation)
 - [Key Features](#key-features)
+- [Account Linking](#account-linking)
+  - [Provider-Consumer Model](#provider-consumer-model)
+  - [Account Linking Flow](#account-linking-flow)
+  - [Implementation](#implementation)
+  - [Security Considerations](#security-considerations)
+  - [Benefits](#benefits)
 - [Authentication Flow](#authentication-flow)
 - [Usage Guide](#usage-guide)
   - [1️⃣ Set up Environment and Server](#1️⃣-set-up-environment-and-server)
@@ -15,6 +21,8 @@ A headless, isomorphic authentication toolkit that runs seamlessly across server
 - [Architecture](#architecture)
 - [API Reference](#api-reference)
   - [Client API](#client-api)
+  - [Provider Client API](#provider-client-api)
+  - [Consumer Client API](#consumer-client-api)
   - [Server API](#server-api)
   - [React API](#react-api)
   - [Test API](#test-api)
@@ -44,6 +52,239 @@ pnpm add @open-game-collective/auth-kit
 - 🎨 **React Integration**: Ready-to-use hooks and components for auth state management.
 - 🔌 **Customizable**: Integrate with your own storage, email delivery systems, and UI components.
 - 📱 **Platform Agnostic**: Same API and behavior across web and mobile platforms.
+- 🔗 **Account Linking**: Securely link user accounts across different applications to enable cross-application features like push notifications.
+
+## Account Linking
+
+Auth Kit provides a robust account linking system that allows applications to connect user accounts across the Open Game ecosystem. This enables rich cross-application features such as push notifications, achievement sharing, and synchronized experiences, while maintaining each application's independent authentication system.
+
+### Provider-Consumer Model
+
+Account linking follows a provider-consumer model:
+
+- **Provider** (e.g., OpenGame): The central identity provider that manages user accounts
+- **Consumer** (e.g., Game applications): Applications that integrate with the provider for feature sharing
+
+Account linking is not about authentication delegation, but rather about enabling cross-application features such as:
+
+- Push notifications from the provider app for events in consumer apps
+- Profile and achievement sharing across applications
+- Synchronized preferences and settings
+- Cross-application rewards and progression
+- Unified social features and friend connections
+
+Each application maintains its own authentication system, but linking accounts allows for a richer, connected user experience across the ecosystem.
+
+### Account Linking Flow
+
+The following diagram illustrates how accounts are linked between the provider (OpenGame) and consumer applications (games), enabling cross-application features while maintaining separate authentication systems:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant OGApp as Provider App
+    participant GameApp as Consumer App
+    participant ProviderAuth as Provider Auth API
+    participant ConsumerAuth as Consumer Auth API
+    
+    User->>OGApp: Initiates account linking
+    OGApp->>ProviderAuth: Requests link token
+    ProviderAuth->>OGApp: Returns link token
+    OGApp->>User: Displays link URL/QR code
+    User->>GameApp: Opens link URL
+    GameApp->>ConsumerAuth: Verifies link token
+    ConsumerAuth->>ProviderAuth: Validates token
+    ProviderAuth->>ConsumerAuth: Confirms token validity
+    GameApp->>User: Requests confirmation
+    User->>GameApp: Confirms linking
+    GameApp->>ConsumerAuth: Confirms link
+    ConsumerAuth->>ProviderAuth: Stores account link
+    ProviderAuth->>ConsumerAuth: Confirms success
+    GameApp->>User: Shows success message
+    Note over User, ConsumerAuth: After linking, cross-app features are enabled
+```
+
+Once accounts are linked, the provider application can send push notifications about events in the consumer application, share profile information between applications, and enable other cross-application features - all while each application maintains its own independent authentication system.
+
+### Implementation
+
+Auth Kit provides specialized APIs for both providers and consumers:
+
+#### Provider Implementation
+
+```typescript
+// Server-side setup
+import { createProviderAuthRouter } from "@open-game-collective/auth-kit/provider/server";
+
+const providerRouter = createProviderAuthRouter({
+  hooks: {
+    // Base auth hooks
+    getUserIdByEmail: async ({ email, env }) => { /* ... */ },
+    // ... other base hooks
+    
+    // Provider-specific hooks
+    getGameIdFromApiKey: async ({ apiKey, env }) => { /* ... */ },
+    storeAccountLink: async ({ openGameUserId, gameId, gameUserId, env }) => { /* ... */ },
+    getLinkedAccounts: async ({ openGameUserId, env }) => { /* ... */ },
+    removeAccountLink: async ({ openGameUserId, gameId, env }) => { /* ... */ },
+  }
+});
+
+// Client-side implementation
+import { createProviderAuthClient } from "@open-game-collective/auth-kit/provider";
+import { createProviderAuthContext } from "@open-game-collective/auth-kit/provider/react";
+
+const ProviderAuthContext = createProviderAuthContext();
+const providerClient = createProviderAuthClient({
+  host: "your-api.example.com",
+  userId: "provider-123",
+  sessionToken: "jwt-token"
+});
+
+function AccountLinkingUI() {
+  return (
+    <ProviderAuthContext.Provider client={providerClient}>
+      <ProviderAuthContext.LinkedAccounts>
+        <h2>Your Linked Accounts</h2>
+        
+        <ProviderAuthContext.LinkedAccountsList>
+          {({ accounts, isLoading, error }) => (
+            <div>
+              {isLoading ? <Spinner /> : (
+                <ul>
+                  {accounts.map(account => (
+                    <li key={account.gameId}>
+                      {account.gameName} - {account.gameUserId}
+                      <ProviderAuthContext.UnlinkAccount gameId={account.gameId}>
+                        {({ onUnlink, isUnlinking, error }) => (
+                          <button 
+                            onClick={onUnlink} 
+                            disabled={isUnlinking}
+                            style={{ marginLeft: '10px' }}
+                          >
+                            {isUnlinking ? "Unlinking..." : "Unlink"}
+                          </button>
+                        )}
+                      </ProviderAuthContext.UnlinkAccount>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {error && <div className="error">{error}</div>}
+            </div>
+          )}
+        </ProviderAuthContext.LinkedAccountsList>
+      </ProviderAuthContext.LinkedAccounts>
+      
+      <ProviderAuthContext.InitiateLinking gameId="game-123">
+        {({ onInitiate, isInitiating, error }) => (
+          <button 
+            onClick={async () => {
+              const { linkToken } = await onInitiate();
+              console.log(`Link URL: https://game.example.com/link?token=${linkToken}`);
+            }} 
+            disabled={isInitiating}
+          >
+            Link New Account
+          </button>
+        )}
+      </ProviderAuthContext.InitiateLinking>
+    </ProviderAuthContext.Provider>
+  );
+}
+```
+
+#### Consumer Implementation
+
+```typescript
+// Server-side setup
+import { createConsumerAuthRouter } from "@open-game-collective/auth-kit/consumer/server";
+
+const consumerRouter = createConsumerAuthRouter({
+  hooks: {
+    // Base auth hooks
+    getUserIdByEmail: async ({ email, env }) => { /* ... */ },
+    // ... other base hooks
+    
+    // Consumer-specific hooks
+    storeOpenGameLink: async ({ gameUserId, openGameUserId, env }) => { /* ... */ },
+    getOpenGameUserId: async ({ gameUserId, env }) => { /* ... */ },
+    getOpenGameProfile: async ({ openGameUserId, env }) => { /* ... */ },
+  },
+  gameId: "your-game-id" // Required for consumer router
+});
+
+// Client-side implementation
+import { createConsumerAuthClient } from "@open-game-collective/auth-kit/consumer";
+import { createConsumerAuthContext } from "@open-game-collective/auth-kit/consumer/react";
+
+const ConsumerAuthContext = createConsumerAuthContext();
+const consumerClient = createConsumerAuthClient({
+  host: "your-api.example.com",
+  userId: "game-user-123",
+  sessionToken: "jwt-token"
+});
+
+function LinkVerificationUI({ linkToken }) {
+  return (
+    <ConsumerAuthContext.Provider value={consumerClient}>
+      <ConsumerAuthContext.VerifyLinkToken token={linkToken}>
+        {({ isVerifying, isValid, openGameUserId, email, error }) => (
+          <div>
+            {isVerifying ? (
+              <p>Verifying link...</p>
+            ) : isValid ? (
+              <ConsumerAuthContext.ConfirmLink 
+                token={linkToken} 
+                gameUserId="game-user-123"
+              >
+                {({ onConfirm, isConfirming, isConfirmed, error }) => (
+                  <div>
+                    <p>Link your account with {email}?</p>
+                    <button 
+                      onClick={onConfirm} 
+                      disabled={isConfirming || isConfirmed}
+                    >
+                      {isConfirming ? "Linking..." : 
+                       isConfirmed ? "Linked!" : "Confirm Link"}
+                    </button>
+                  </div>
+                )}
+              </ConsumerAuthContext.ConfirmLink>
+            ) : (
+              <p>Invalid or expired link token</p>
+            )}
+          </div>
+        )}
+      </ConsumerAuthContext.VerifyLinkToken>
+    </ConsumerAuthContext.Provider>
+  );
+}
+```
+
+### Security Considerations
+
+The account linking system includes several security features to ensure secure cross-application communication:
+
+1. **JWT-Based Link Tokens**: Cryptographically signed tokens with short expiration times ensure secure linking process
+2. **API Key Authentication**: Server-to-server communication secured with API keys for trusted application verification
+3. **User Confirmation**: Explicit user consent required before enabling cross-application features
+4. **Secure Storage**: Account links stored securely on both provider and consumer sides
+5. **Unlinking Capability**: Users can disable cross-application features by unlinking accounts at any time
+6. **Limited Data Sharing**: Only necessary data is shared between applications, with clear user consent
+7. **Independent Authentication**: Each application maintains its own authentication system, with no credential sharing
+
+### Benefits
+
+- **Connected Ecosystem**: Enable rich interactions between different applications in the ecosystem
+- **Enhanced User Experience**: Provide seamless cross-application features without requiring users to manually connect accounts
+- **Push Notifications**: Allow the provider app to send notifications about events in linked consumer apps
+- **Feature Sharing**: Share profiles, achievements, and other data across applications with user consent
+- **Independent Authentication**: Each application maintains its own authentication while still enabling connected experiences
+- **Secure Communication**: All communication between applications is secured with API keys and JWT tokens
+- **User Control**: Users can link and unlink accounts at any time, maintaining control over their connected experience
+
+For detailed implementation guidance, see the [Account Linking Implementation Guide](docs/account-linking.md).
 
 ## Authentication Flow
 
@@ -621,7 +862,17 @@ export default function App() {
       </head>
       <body>
         <AuthContext.Provider client={authClient}>
-          <Outlet />
+          <AuthContext.Loading>
+            <LoadingSpinner />
+          </AuthContext.Loading>
+          
+          <AuthContext.Verified>
+            <VerifiedUserDashboard />
+          </AuthContext.Verified>
+          
+          <AuthContext.Unverified>
+            <EmailVerificationForm />
+          </AuthContext.Unverified>
         </AuthContext.Provider>
         <ScrollRestoration />
         <Scripts />
@@ -1295,6 +1546,55 @@ interface AuthClient {
   // expiresIn: Expiration time in seconds (e.g. 300 for 5 minutes)
   ```
 
+### Provider Client API
+
+The provider client extends the base client with methods for managing linked accounts:
+
+```typescript
+interface ProviderAuthClient extends AuthClient {
+  getLinkedAccounts(): Promise<LinkedAccount[]>;
+  initiateAccountLinking(gameId: string): Promise<{ linkToken: string; expiresAt: string }>;
+  unlinkAccount(gameId: string): Promise<boolean>;
+  getState(): ProviderAuthState;
+  subscribe(callback: (state: ProviderAuthState) => void): () => void;
+}
+```
+
+**Provider-Specific Methods:**
+
+- `getLinkedAccounts()`: Get list of accounts linked to the provider account
+- `initiateAccountLinking(gameId)`: Generate a link token for a specific game
+- `unlinkAccount(gameId)`: Remove link between provider account and game account
+
+### Consumer Client API
+
+The consumer client extends the base client with methods for managing links with the provider:
+
+```typescript
+interface ConsumerAuthClient extends AuthClient {
+  getOpenGameLinkStatus(): Promise<{
+    isLinked: boolean;
+    openGameUserId?: string;
+    linkedAt?: string;
+    profile?: Record<string, any>;
+  }>;
+  verifyLinkToken(token: string): Promise<{
+    valid: boolean;
+    openGameUserId?: string;
+    email?: string;
+  }>;
+  confirmLink(token: string, gameUserId: string): Promise<boolean>;
+  getState(): ConsumerAuthState;
+  subscribe(callback: (state: ConsumerAuthState) => void): () => void;
+}
+```
+
+**Consumer-Specific Methods:**
+
+- `getOpenGameLinkStatus()`: Check if the consumer account is linked with a provider account
+- `verifyLinkToken(token)`: Verify a link token from a provider
+- `confirmLink(token, gameUserId)`: Confirm linking between consumer and provider accounts
+
 ### Server API
 
 The server provides two main exports:
@@ -1366,6 +1666,188 @@ Creates a React context for auth state management, providing:
 - A Provider for passing down the auth client.
 - Hooks: `useClient` and `useSelector` for accessing and subscribing to state.
 - Conditional components: `<Loading>`, `<Authenticated>`, `<Verified>`, and `<Unverified>`.
+
+#### Provider API
+
+`createProviderAuthContext()`
+
+Creates a React context specifically for provider authentication, providing:
+- A Provider for passing down the provider auth client.
+- Hooks: `useClient` and `useSelector` for accessing and subscribing to provider state.
+- Components for managing linked accounts:
+  - `<LinkedAccounts>`: Renders children when user has linked accounts
+  - `<NoLinkedAccounts>`: Renders children when user has no linked accounts
+  - `<LinkedAccountsList>`: Renders a function child with linked accounts data
+  - `<InitiateLinking>`: Renders a function child with account linking functionality
+  - `<UnlinkAccount>`: Renders a function child with account unlinking functionality
+
+Example:
+```tsx
+import { createProviderAuthContext } from "@open-game-collective/auth-kit/provider-react";
+import { createProviderAuthClient } from "@open-game-collective/auth-kit/provider-client";
+
+const ProviderAuthContext = createProviderAuthContext();
+const providerClient = createProviderAuthClient({
+  host: "your-api.example.com",
+  userId: "provider-123",
+  sessionToken: "jwt-token"
+});
+
+function App() {
+  return (
+    <ProviderAuthContext.Provider client={providerClient}>
+      {/* Show when user has linked accounts */}
+      <ProviderAuthContext.LinkedAccounts>
+        <h2>Your Linked Accounts</h2>
+        
+        <ProviderAuthContext.LinkedAccountsList>
+          {({ accounts, isLoading, error }) => (
+            <div>
+              {isLoading ? <Spinner /> : (
+                <ul>
+                  {accounts.map(account => (
+                    <li key={account.gameId}>
+                      {account.gameName} - {account.gameUserId}
+                      <ProviderAuthContext.UnlinkAccount gameId={account.gameId}>
+                        {({ onUnlink, isUnlinking, error }) => (
+                          <button 
+                            onClick={onUnlink} 
+                            disabled={isUnlinking}
+                            style={{ marginLeft: '10px' }}
+                          >
+                            {isUnlinking ? "Unlinking..." : "Unlink"}
+                          </button>
+                        )}
+                      </ProviderAuthContext.UnlinkAccount>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {error && <div className="error">{error}</div>}
+            </div>
+          )}
+        </ProviderAuthContext.LinkedAccountsList>
+      </ProviderAuthContext.LinkedAccounts>
+      
+      {/* Show when user has no linked accounts */}
+      <ProviderAuthContext.NoLinkedAccounts>
+        <h2>Link Your First Account</h2>
+        
+        <ProviderAuthContext.InitiateLinking gameId="game-123">
+          {({ onInitiate, isInitiating, error }) => (
+            <div>
+              <button 
+                onClick={async () => {
+                  const { linkToken } = await onInitiate();
+                  console.log("Link with this token:", linkToken);
+                }} 
+                disabled={isInitiating}
+              >
+                {isInitiating ? "Generating Link..." : "Link Account"}
+              </button>
+              {error && <div className="error">{error}</div>}
+            </div>
+          )}
+        </ProviderAuthContext.InitiateLinking>
+      </ProviderAuthContext.NoLinkedAccounts>
+    </ProviderAuthContext.Provider>
+  );
+}
+```
+
+#### Consumer API
+
+`createConsumerAuthContext()`
+
+Creates a React context specifically for consumer (game) authentication, providing:
+- A Provider for passing down the consumer auth client.
+- Hooks: `useClient` and `useSelector` for accessing and subscribing to consumer state.
+- Components for managing open game linking:
+  - `<LinkedWithOpenGame>`: Renders children when user is linked with an open game
+  - `<NotLinkedWithOpenGame>`: Renders children when user is not linked with an open game
+  - `<OpenGameProfile>`: Renders a function child with open game profile data
+  - `<VerifyLinkToken>`: Renders a function child with link token verification functionality
+  - `<ConfirmLink>`: Renders a function child with link confirmation functionality
+
+Example:
+```tsx
+import { createConsumerAuthContext } from "@open-game-collective/auth-kit/consumer-react";
+import { createConsumerAuthClient } from "@open-game-collective/auth-kit/consumer-client";
+
+const ConsumerAuthContext = createConsumerAuthContext();
+const consumerClient = createConsumerAuthClient({
+  host: "your-api.example.com",
+  userId: "game-user-123",
+  sessionToken: "jwt-token"
+});
+
+function App() {
+  return (
+    <ConsumerAuthContext.Provider value={consumerClient}>
+      {/* Show when user is linked with open game */}
+      <ConsumerAuthContext.LinkedWithOpenGame>
+        <h2>Your Open Game Account</h2>
+        
+        <ConsumerAuthContext.OpenGameProfile>
+          {({ profile, isLoading, error }) => (
+            <div>
+              {isLoading ? <Spinner /> : (
+                <div>
+                  <h3>{profile?.displayName || "Anonymous"}</h3>
+                  {profile?.avatarUrl && (
+                    <img src={profile.avatarUrl} alt="Profile" />
+                  )}
+                </div>
+              )}
+              {error && <div className="error">{error}</div>}
+            </div>
+          )}
+        </ConsumerAuthContext.OpenGameProfile>
+      </ConsumerAuthContext.LinkedWithOpenGame>
+      
+      {/* Show when user is not linked with open game */}
+      <ConsumerAuthContext.NotLinkedWithOpenGame>
+        <h2>Link Your Open Game Account</h2>
+        
+        {/* When user has a link token */}
+        {linkToken && (
+          <ConsumerAuthContext.VerifyLinkToken token={linkToken}>
+            {({ isVerifying, isValid, openGameUserId, email, error }) => (
+              <div>
+                {isVerifying ? <Spinner /> : (
+                  isValid ? (
+                    <ConsumerAuthContext.ConfirmLink 
+                      token={linkToken} 
+                      gameUserId="game-user-123"
+                    >
+                      {({ onConfirm, isConfirming, isConfirmed, error }) => (
+                        <div>
+                          <p>Link with {email}?</p>
+                          <button 
+                            onClick={onConfirm} 
+                            disabled={isConfirming || isConfirmed}
+                          >
+                            {isConfirming ? "Linking..." : 
+                             isConfirmed ? "Linked!" : "Confirm Link"}
+                          </button>
+                          {error && <div className="error">{error}</div>}
+                        </div>
+                      )}
+                    </ConsumerAuthContext.ConfirmLink>
+                  ) : (
+                    <div>Invalid or expired link token</div>
+                  )
+                )}
+                {error && <div className="error">{error}</div>}
+              </div>
+            )}
+          </ConsumerAuthContext.VerifyLinkToken>
+        )}
+      </ConsumerAuthContext.NotLinkedWithOpenGame>
+    </ConsumerAuthContext.Provider>
+  );
+}
+```
 
 ### Test API
 

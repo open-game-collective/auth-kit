@@ -170,8 +170,8 @@ describe("Consumer Auth Context", () => {
 
       render(
         <AuthContext.Provider value={mockClient}>
-          <AuthContext.OpenGameProfile
-            render={({ profile, isLoading, error }) => (
+          <AuthContext.OpenGameProfile>
+            {({ profile, isLoading, error }) => (
               <div>
                 <div data-testid="loading">{isLoading ? "Loading" : "Not Loading"}</div>
                 <div data-testid="error">{error || "No Error"}</div>
@@ -181,7 +181,7 @@ describe("Consumer Auth Context", () => {
                 <div data-testid="avatar-url">{(profile?.avatarUrl as string) ?? "No Avatar"}</div>
               </div>
             )}
-          />
+          </AuthContext.OpenGameProfile>
         </AuthContext.Provider>
       );
 
