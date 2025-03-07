@@ -607,869 +607,295 @@ In this deployment:
 The Auth middleware handles all authentication routes and token management, integrated with your web application.
 
 ```typescript
-// auth-server.ts
-import { AuthHooks, withAuth, createAuthRouter } from "@open-game-collective/auth-kit/server";
+// auth-worker.ts
+import { AuthHooks, createAuthRouter, Router } from "@open-game-collective/auth-kit/server";
 import { Env } from "./env";
+import { WorkerEntrypoint } from "@cloudflare/workers-types";
 
-// Define your auth hooks - these connect to your storage and email systems
-const authHooks: AuthHooks<Env> = {
-  getUserIdByEmail: async ({ email, env, request }) => {
-    return await env.KV_STORAGE.get(`email:${email}`);
-  },
+export class AuthWorker extends WorkerEntrypoint<Env> {
+  private router: Router<Env>;
+  private hooks: AuthHooks<Env>;
 
-  storeVerificationCode: async ({ email, code, env, request }) => {
-    await env.KV_STORAGE.put(`code:${email}`, code, {
-      expirationTtl: 600,
-    });
-  },
-
-  verifyVerificationCode: async ({ email, code, env, request }) => {
-    const storedCode = await env.KV_STORAGE.get(`code:${email}`);
-    return storedCode === code;
-  },
-
-  sendVerificationCode: async ({ email, code, env, request }) => {
-    try {
-      const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.SENDGRID_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          personalizations: [{ to: [{ email }] }],
-          from: { email: "auth@yourdomain.com" },
-          subject: "Your verification code",
-          content: [{ type: "text/plain", value: `Your code is: ${code}` }],
-        }),
-      });
-      return response.ok;
-    } catch (error) {
-      console.error("Failed to send email:", error);
-      return false;
-    }
-  },
-
-  onNewUser: async ({ userId, env, request }) => {
-    await env.KV_STORAGE.put(
-      `user:${userId}`,
-      JSON.stringify({
-        created: new Date().toISOString(),
-      })
-    );
-  },
-
-  onAuthenticate: async ({ userId, email, env, request }) => {
-    await env.KV_STORAGE.put(
-      `user:${userId}:lastLogin`,
-      new Date().toISOString()
-    );
-  },
-
-  onEmailVerified: async ({ userId, email, env, request }) => {
-    await env.KV_STORAGE.put(`user:${userId}:verified`, "true");
-    await env.KV_STORAGE.put(`email:${email}`, userId);
-  },
-};
-
-// Integrated with application
-// This wraps your application handler with auth middleware
-export const withAuthMiddleware = <TEnv extends { AUTH_SECRET: string }>(
-  appHandler: (
-    request: Request,
-    env: TEnv,
-    context: { userId: string; sessionId: string; sessionToken: string }
-  ) => Promise<Response>
-) => {
-  return withAuth(appHandler, { hooks: authHooks });
-};
-
-// Example server
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    // Use the auth middleware to handle all routes
-    return withAuthMiddleware(async (request, env, { userId, sessionId, sessionToken }) => {
-      // Your application logic here
-      const url = new URL(request.url);
-      
-      // Handle your application routes
-      if (url.pathname === '/') {
-        return new Response('Welcome to my app!');
-      }
-      
-      // Return 404 for unknown routes
-      return new Response('Not Found', { status: 404 });
-    })(request, env);
-  }
-};
-```
-
-```mermaid
-sequenceDiagram
-    participant Browser
-    participant WebApp
-    participant AuthMiddleware
-    participant Storage
-    participant Email
+  constructor() {
+    super();
     
-    %% Initial visit and anonymous session
-    Browser->>WebApp: Visit application
-    WebApp->>AuthMiddleware: Check auth status
-    AuthMiddleware->>AuthMiddleware: Create anonymous session
-    AuthMiddleware-->>WebApp: Return userId, sessionToken
-    WebApp-->>Browser: Render app with auth client
-    
-    %% Email verification flow
-    Browser->>AuthMiddleware: POST /auth/request-code
-    AuthMiddleware->>Storage: Store verification code
-    AuthMiddleware->>Email: Send code to user
-    Email-->>Browser: Deliver code
-    
-    Browser->>AuthMiddleware: POST /auth/verify
-    AuthMiddleware->>Storage: Verify code
-    AuthMiddleware->>Storage: Update user status
-    AuthMiddleware-->>Browser: Return tokens + set cookies
-    
-    %% Token refresh flow
-    Note over Browser,AuthMiddleware: When session token expires
-    Browser->>AuthMiddleware: Request with expired session
-    AuthMiddleware->>AuthMiddleware: Validate refresh token from cookie
-    AuthMiddleware-->>Browser: Issue new session token
-```
+    // Define hooks using KV - only defined once when the worker is instantiated
+    this.hooks = {
+      getUserIdByEmail: async ({ email, env }) => {
+        try {
+          const userIdKey = `email:${email}`;
+          return await env.AUTH_KV.get(userIdKey);
+        } catch (error) {
+          console.error("Error getting userId by email:", error);
+          return null;
+        }
+      },
 
-### Web Application Setup
-
-Your web application integrates the auth middleware directly.
-
-```typescript
-// app/server.ts (e.g., for Remix, Next.js, etc.)
-import { withAuthMiddleware } from './auth-server';
-import { createRequestHandler } from "@remix-run/cloudflare";
-import * as build from "@remix-run/dev/server-build";
-import { Env } from "./env";
-
-if (process.env.NODE_ENV === "development") {
-  logDevReady(build);
-}
-
-const handleRemixRequest = createRequestHandler(build);
-
-// Wrap your app handler with auth middleware
-const handler = withAuthMiddleware<Env>(
-  async (request, env, { userId, sessionId, sessionToken }) => {
-    try {
-      return await handleRemixRequest(request, {
-        env,
-        userId,
-        sessionId,
-        sessionToken,
-        requestId: crypto.randomUUID(),
-      });
-    } catch (error) {
-      console.error("Error processing request:", error);
-      return new Response("Internal Error", { status: 500 });
-    }
-  }
-);
-
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    return handler(request, env);
-  },
-};
-```
-
-### React Router 7 Integration
-
-Auth Kit integrates seamlessly with React Router 7, allowing you to access authentication state in your loaders and actions.
-
-```typescript
-// app/entry.server.tsx
-import { withAuth } from "@open-game-collective/auth-kit/server";
-import { createRequestHandler } from "@remix-run/cloudflare";
-import * as build from "@remix-run/dev/server-build";
-import { authHooks } from "./auth-hooks";
-
-// Create the request handler with auth middleware
-export const handler = withAuth(async (request, env, { userId, sessionId, sessionToken }) => {
-  // Conditionally log auth information in development mode
-  if (process.env.NODE_ENV === 'development') {
-    console.log(`Request from user: ${userId}, session: ${sessionId}`);
-  }
-  
-  // Pass auth context to Remix loader context
-  return createRequestHandler({
-    build,
-    mode: process.env.NODE_ENV,
-    getLoadContext() {
-      return { 
-        env, 
-        auth: { 
-          userId, 
-          sessionId, 
-          sessionToken 
-        } 
-      };
-    },
-  })(request);
-}, {
-  hooks: authHooks
-});
-
-// app/root.tsx
-import { createAuthClient } from "@open-game-collective/auth-kit/client";
-import { createAuthContext } from "@open-game-collective/auth-kit/react";
-import {
-  Links,
-  Meta,
-  Outlet,
-  Scripts,
-  ScrollRestoration,
-  useLoaderData
-} from "@remix-run/react";
-import { json } from "@remix-run/cloudflare";
-
-// Create auth context for React components
-const AuthContext = createAuthContext();
-
-// Root loader provides auth state to client
-export async function loader({ request, context }) {
-  const { auth } = context;
-  
-  return json({
-    auth: {
-      userId: auth.userId,
-      sessionToken: auth.sessionToken
-    }
-  });
-}
-
-export default function App() {
-  const { auth } = useLoaderData<typeof loader>();
-  const [authClient] = useState(() => 
-    createAuthClient({
-      host: window.location.host,
-      userId: auth.userId,
-      sessionToken: auth.sessionToken
-    })
-  );
-
-  return (
-    <html lang="en">
-      <head>
-        <Meta />
-        <Links />
-      </head>
-      <body>
-        <AuthContext.Provider client={authClient}>
-          <AuthContext.Loading>
-            <LoadingSpinner />
-          </AuthContext.Loading>
+      storeVerificationCode: async ({ email, code, env }) => {
+        try {
+          const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+          const codeData = JSON.stringify({
+            code,
+            expiresAt: expiresAt.toISOString(),
+          });
           
-          <AuthContext.Verified>
-            <VerifiedUserDashboard />
-          </AuthContext.Verified>
+          await env.AUTH_KV.put(`verification:${email}`, codeData, {
+            expirationTtl: 600, // 10 minutes in seconds
+          });
+        } catch (error) {
+          console.error("Error storing verification code:", error);
+        }
+      },
+
+      verifyVerificationCode: async ({ email, code, env }) => {
+        try {
+          const codeDataStr = await env.AUTH_KV.get(`verification:${email}`);
+          if (!codeDataStr) return false;
           
-          <AuthContext.Unverified>
-            <EmailVerificationForm />
-          </AuthContext.Unverified>
-        </AuthContext.Provider>
-        <ScrollRestoration />
-        <Scripts />
-      </body>
-    </html>
-  );
-}
+          const codeData = JSON.parse(codeDataStr);
+          const now = new Date();
+          const expiresAt = new Date(codeData.expiresAt);
+          
+          return codeData.code === code && now < expiresAt;
+        } catch (error) {
+          console.error("Error verifying code:", error);
+          return false;
+        }
+      },
 
-// app/routes/profile.tsx
-import { AuthContext } from "~/root";
-import { json, redirect } from "@remix-run/cloudflare";
-import { useLoaderData, Form } from "@remix-run/react";
+      sendVerificationCode: async ({ email, code, env }) => {
+        try {
+          const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${env.SENDGRID_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              personalizations: [{ to: [{ email }] }],
+              from: { email: "auth@yourdomain.com" },
+              subject: "Your verification code",
+              content: [{ type: "text/plain", value: `Your code is: ${code}` }],
+            }),
+          });
+          return response.ok;
+        } catch (error) {
+          console.error("Failed to send email:", error);
+          return false;
+        }
+      },
 
-// Protect routes with loader
-export async function loader({ request, context }) {
-  const { auth } = context;
-  
-  // Get email from context (if user is verified)
-  const email = await context.env.KV_STORAGE.get(`user:${auth.userId}:email`);
-  
-  // If not verified, redirect to verification page
-  if (!email) {
-    return redirect("/verify");
-  }
-  
-  // Load user profile data
-  const profile = await context.env.KV_STORAGE.get(`user:${auth.userId}:profile`);
-  
-  return json({
-    email,
-    profile: profile ? JSON.parse(profile) : null
-  });
-}
+      onNewUser: async ({ userId, env }) => {
+        try {
+          await env.AUTH_KV.put(`user:${userId}`, JSON.stringify({
+            userId,
+            createdAt: new Date().toISOString(),
+          }));
+        } catch (error) {
+          console.error("Error creating new user:", error);
+        }
+      },
 
-// Handle form submissions with action
-export async function action({ request, context }) {
-  const { auth } = context;
-  const formData = await request.formData();
-  const name = formData.get("name");
-  
-  // Update user profile
-  await context.env.KV_STORAGE.put(
-    `user:${auth.userId}:profile`,
-    JSON.stringify({ name })
-  );
-  
-  return json({ success: true });
-}
+      onAuthenticate: async ({ userId, env }) => {
+        try {
+          const userDataStr = await env.AUTH_KV.get(`user:${userId}`);
+          if (!userDataStr) return;
+          
+          const userData = JSON.parse(userDataStr);
+          userData.lastLogin = new Date().toISOString();
+          
+          await env.AUTH_KV.put(`user:${userId}`, JSON.stringify(userData));
+        } catch (error) {
+          console.error("Error updating last login:", error);
+        }
+      },
 
-export default function Profile() {
-  const { email, profile } = useLoaderData<typeof loader>();
-  const client = AuthContext.useClient();
-  const isLoading = AuthContext.useSelector(state => state.isLoading);
-  
-  const handleLogout = async () => {
-    await client.logout();
-    window.location.href = "/";
-  };
-  
-  return (
-    <div>
-      <h1>Profile</h1>
-      <p>Email: {email}</p>
+      onEmailVerified: async ({ userId, email, env }) => {
+        try {
+          // Store email to userId mapping
+          await env.AUTH_KV.put(`email:${email}`, userId);
+          
+          // Update user record
+          const userDataStr = await env.AUTH_KV.get(`user:${userId}`);
+          if (!userDataStr) return;
+          
+          const userData = JSON.parse(userDataStr);
+          userData.email = email;
+          userData.emailVerified = true;
+          
+          await env.AUTH_KV.put(`user:${userId}`, JSON.stringify(userData));
+        } catch (error) {
+          console.error("Error verifying email:", error);
+        }
+      },
       
-      <Form method="post">
-        <label>
-          Name:
-          <input 
-            name="name" 
-            defaultValue={profile?.name || ""} 
-          />
-        </label>
-        <button type="submit" disabled={isLoading}>
-          {isLoading ? "Saving..." : "Save"}
-        </button>
-      </Form>
+      // Provider-specific hooks
+      getGameIdFromApiKey: async ({ apiKey, env }) => {
+        try {
+          return await env.AUTH_KV.get(`apiKey:${apiKey}`);
+        } catch (error) {
+          console.error("Error getting game ID from API key:", error);
+          return null;
+        }
+      },
       
-      <button onClick={handleLogout}>Logout</button>
-    </div>
-  );
-}
-
-// app/routes/verify.tsx
-import { AuthContext } from "~/root";
-import { useState } from "react";
-import { useNavigate } from "@remix-run/react";
-
-export default function Verify() {
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [codeSent, setCodeSent] = useState(false);
-  const client = AuthContext.useClient();
-  const isLoading = AuthContext.useSelector(state => state.isLoading);
-  const navigate = useNavigate();
-  
-  const requestCode = async (e) => {
-    e.preventDefault();
-    try {
-      await client.requestCode(email);
-      setCodeSent(true);
-    } catch (error) {
-      console.error("Failed to send code:", error);
-    }
-  };
-  
-  const verifyCode = async (e) => {
-    e.preventDefault();
-    try {
-      const result = await client.verifyEmail(email, code);
-      if (result.success) {
-        navigate("/profile");
+      storeAccountLink: async ({ openGameUserId, gameId, gameUserId, env }) => {
+        try {
+          const linkData = {
+            openGameUserId,
+            gameId,
+            gameUserId,
+            linkedAt: new Date().toISOString(),
+          };
+          
+          // Store link in both directions for easy lookup
+          await env.AUTH_KV.put(
+            `accountLink:${openGameUserId}:${gameId}`, 
+            JSON.stringify(linkData)
+          );
+          
+          await env.AUTH_KV.put(
+            `gameLink:${gameId}:${gameUserId}`, 
+            openGameUserId
+          );
+          
+          return true;
+        } catch (error) {
+          console.error("Error storing account link:", error);
+          return false;
+        }
+      },
+      
+      getLinkedAccounts: async ({ openGameUserId, env }) => {
+        try {
+          // List all account links for this user
+          const links = await env.AUTH_KV.list({ prefix: `accountLink:${openGameUserId}:` });
+          
+          // Fetch each link's data
+          const linkedAccounts = await Promise.all(
+            links.keys.map(async (key) => {
+              const linkDataStr = await env.AUTH_KV.get(key.name);
+              if (!linkDataStr) return null;
+              
+              const linkData = JSON.parse(linkDataStr);
+              return {
+                gameId: linkData.gameId,
+                gameUserId: linkData.gameUserId,
+                linkedAt: linkData.linkedAt,
+                gameName: env.GAME_NAMES[linkData.gameId] || linkData.gameId,
+              };
+            })
+          );
+          
+          // Filter out any null values and return
+          return linkedAccounts.filter(Boolean);
+        } catch (error) {
+          console.error("Error getting linked accounts:", error);
+          return [];
+        }
+      },
+      
+      removeAccountLink: async ({ openGameUserId, gameId, env }) => {
+        try {
+          // Get the link data first to get the gameUserId
+          const linkDataStr = await env.AUTH_KV.get(`accountLink:${openGameUserId}:${gameId}`);
+          if (!linkDataStr) return false;
+          
+          const linkData = JSON.parse(linkDataStr);
+          
+          // Delete both link directions
+          await env.AUTH_KV.delete(`accountLink:${openGameUserId}:${gameId}`);
+          await env.AUTH_KV.delete(`gameLink:${gameId}:${linkData.gameUserId}`);
+          
+          return true;
+        } catch (error) {
+          console.error("Error removing account link:", error);
+          return false;
+        }
+      },
+      
+      // Consumer-specific hooks
+      storeOpenGameLink: async ({ gameUserId, openGameUserId, env }) => {
+        try {
+          const linkData = {
+            openGameUserId,
+            gameId: env.GAME_ID,
+            gameUserId,
+            linkedAt: new Date().toISOString(),
+          };
+          
+          // Store link in both directions
+          await env.AUTH_KV.put(
+            `accountLink:${openGameUserId}:${env.GAME_ID}`, 
+            JSON.stringify(linkData)
+          );
+          
+          await env.AUTH_KV.put(
+            `gameLink:${env.GAME_ID}:${gameUserId}`, 
+            openGameUserId
+          );
+          
+          return true;
+        } catch (error) {
+          console.error("Error storing open game link:", error);
+          return false;
+        }
+      },
+      
+      getOpenGameUserId: async ({ gameUserId, env }) => {
+        try {
+          return await env.AUTH_KV.get(`gameLink:${env.GAME_ID}:${gameUserId}`);
+        } catch (error) {
+          console.error("Error getting open game user ID:", error);
+          return null;
+        }
       }
-    } catch (error) {
-      console.error("Failed to verify code:", error);
-    }
-  };
-  
-  return (
-    <div>
-      <h1>Verify Your Email</h1>
-      
-      {!codeSent ? (
-        <form onSubmit={requestCode}>
-          <label>
-            Email:
-            <input 
-              type="email" 
-              value={email} 
-              onChange={(e) => setEmail(e.target.value)} 
-              required 
-            />
-          </label>
-          <button type="submit" disabled={isLoading}>
-            {isLoading ? "Sending..." : "Send Verification Code"}
-          </button>
-        </form>
-      ) : (
-        <form onSubmit={verifyCode}>
-          <p>We sent a code to {email}</p>
-          <label>
-            Verification Code:
-            <input 
-              type="text" 
-              value={code} 
-              onChange={(e) => setCode(e.target.value)} 
-              required 
-            />
-          </label>
-          <button type="submit" disabled={isLoading}>
-            {isLoading ? "Verifying..." : "Verify Code"}
-          </button>
-        </form>
-      )}
-    </div>
-  );
-}
-```
-
-This setup provides:
-
-1. **Server-side Authentication**:
-   - The `withAuth` middleware automatically handles authentication for all routes
-   - Auth state is passed to loaders and actions via the context
-   - Protected routes can check auth state and redirect if needed
-
-2. **Client-side Integration**:
-   - Auth state is hydrated from the server via the root loader
-   - The auth client is created once and provided to all components
-   - Components can access auth state via hooks and conditional components
-
-3. **Form Handling**:
-   - React Router's Form component works with auth-protected actions
-   - Client-side auth state updates automatically after form submissions
-   - Loading states are handled via the auth context
-
-4. **Navigation**:
-   - Auth-based redirects work both server-side and client-side
-   - After verification, users are redirected to protected routes
-   - After logout, users are redirected to public routes
-
-You can use Auth Kit with:
-- Next.js: In API routes or server components
-- React Router: In loaders or actions
-- TanStack Router: In route handlers
-- Vite SSR: In server entry point
-
-The only requirement is implementing the auth hooks for your chosen storage and email delivery solutions.
-
-### Mobile Applications (React Native)
-
-For mobile applications, you'll need to explicitly manage user creation and token storage. For enhanced security, we recommend using biometric authentication to protect the refresh token:
-
-```typescript
-// app/auth.ts
-import { createAnonymousUser, createAuthClient } from "@open-game-collective/auth-kit/client";
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as LocalAuthentication from 'expo-local-authentication';
-import * as SecureStore from 'expo-secure-store';
-
-// Keys for different storage mechanisms
-const AUTH_KEYS = {
-  // Regular storage for non-sensitive data
-  USER_ID: 'auth_user_id',
-  SESSION_TOKEN: 'auth_session_token',
-  
-  // Secure storage for sensitive data
-  REFRESH_TOKEN: 'auth_refresh_token'
-} as const;
-
-// Check if biometric authentication is available
-async function isBiometricAvailable() {
-  const compatible = await LocalAuthentication.hasHardwareAsync();
-  const enrolled = await LocalAuthentication.isEnrolledAsync();
-  return compatible && enrolled;
-}
-
-// Store refresh token with biometric protection if available
-async function storeRefreshToken(token: string) {
-  if (await isBiometricAvailable()) {
-    // Use biometric authentication before storing the token
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Authenticate to secure your session',
-      fallbackLabel: 'Use passcode'
-    });
+    };
     
-    if (result.success) {
-      // Store in secure storage after biometric authentication
-      await SecureStore.setItemAsync(AUTH_KEYS.REFRESH_TOKEN, token);
-      return true;
-    } else {
-      console.warn('Biometric authentication failed, using fallback storage');
-      // Fallback to regular secure storage
-      await AsyncStorage.setItem(AUTH_KEYS.REFRESH_TOKEN, token);
-      return false;
-    }
-  } else {
-    // Fallback to regular secure storage if biometrics not available
-    await AsyncStorage.setItem(AUTH_KEYS.REFRESH_TOKEN, token);
-    return false;
-  }
-}
-
-// Retrieve refresh token, requiring biometric auth if it was stored that way
-async function getRefreshToken() {
-  if (await isBiometricAvailable()) {
-    try {
-      // Try to get from secure storage first (requires biometrics on some devices)
-      return await SecureStore.getItemAsync(AUTH_KEYS.REFRESH_TOKEN);
-    } catch (error) {
-      // Fallback to AsyncStorage
-      return await AsyncStorage.getItem(AUTH_KEYS.REFRESH_TOKEN);
-    }
-  } else {
-    // Use regular storage if biometrics not available
-    return await AsyncStorage.getItem(AUTH_KEYS.REFRESH_TOKEN);
-  }
-}
-
-async function clearAuthTokens() {
-  await Promise.all([
-    AsyncStorage.removeItem(AUTH_KEYS.USER_ID),
-    AsyncStorage.removeItem(AUTH_KEYS.SESSION_TOKEN),
-    // Clear from both storage mechanisms
-    AsyncStorage.removeItem(AUTH_KEYS.REFRESH_TOKEN),
-    SecureStore.deleteItemAsync(AUTH_KEYS.REFRESH_TOKEN)
-  ]);
-}
-
-export async function initializeAuth() {
-  // Try to load existing tokens
-  const [userId, sessionToken, refreshToken] = await Promise.all([
-    AsyncStorage.getItem(AUTH_KEYS.USER_ID),
-    AsyncStorage.getItem(AUTH_KEYS.SESSION_TOKEN),
-    getRefreshToken() // Use our helper that handles biometric auth
-  ]);
-
-  // If we have existing tokens, create client with them
-  if (userId && sessionToken) {
-    return createAuthClient({
-      host: "your-worker.workers.dev",
-      userId,
-      sessionToken,
-      refreshToken // Include refresh token for mobile
+    // Create the router once during initialization
+    this.router = createAuthRouter({
+      hooks: this.hooks,
+      useTopLevelDomain: true
     });
   }
-
-  // Otherwise create a new anonymous user with longer refresh token for mobile
-  const tokens = await createAnonymousUser({
-    host: "your-worker.workers.dev",
-    refreshTokenExpiresIn: '30d', // Longer refresh token for mobile
-    sessionTokenExpiresIn: '1h'   // Longer session token for mobile
-  });
   
-  // Store the tokens
-  await Promise.all([
-    AsyncStorage.setItem(AUTH_KEYS.USER_ID, tokens.userId),
-    AsyncStorage.setItem(AUTH_KEYS.SESSION_TOKEN, tokens.sessionToken),
-    storeRefreshToken(tokens.refreshToken) // Use our helper for biometric protection
-  ]);
-
-  // Create and return the client
-  return createAuthClient({
-    host: "your-worker.workers.dev",
-    userId: tokens.userId,
-    sessionToken: tokens.sessionToken,
-    refreshToken: tokens.refreshToken // Include refresh token for mobile
-  });
-}
-
-// App.tsx
-import { AuthContext } from "./auth.context";
-import { useState, useEffect, useCallback } from "react";
-import { Button } from "react-native";
-import { NavigationContainer } from "@react-navigation/native";
-
-export default function App() {
-  const [client, setClient] = useState<AuthClient | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
-
-  useEffect(() => {
-    initializeAuth()
-      .then(setClient)
-      .finally(() => setIsLoading(false));
-  }, []);
-
-  const handleLogout = useCallback(async () => {
-    if (!client || isLoggingOut) return;
-    
-    // Immediately set logging out state and clear client
-    setIsLoggingOut(true);
-    setClient(null);
-
-    try {
-      // Call client logout to clear server-side session
-      await client.logout();
-      
-      // Clear stored tokens
-      await clearAuthTokens();
-      
-      // Create new anonymous session
-      const newClient = await initializeAuth();
-      setClient(newClient);
-    } finally {
-      setIsLoggingOut(false);
-    }
-  }, [client, isLoggingOut]);
-
-  if (isLoading || isLoggingOut || !client) {
-    return <LoadingScreen />;
-  }
-
-  return (
-    <AuthContext.Provider client={client}>
-      <NavigationContainer>
-        <YourApp />
-        <Button 
-          title="Logout" 
-          onPress={handleLogout}
-          disabled={isLoggingOut} 
-        />
-      </NavigationContainer>
-    </AuthContext.Provider>
-  );
-}
-
-// Usage in components
-function ProfileScreen() {
-  const client = AuthContext.useClient();
-  const email = AuthContext.useSelector(state => state.email);
-
-  const verifyEmail = async () => {
-    await client.requestCode('user@example.com');
-    // Show verification code input...
-  };
-
-  return (
-    <View>
-      {!email ? (
-        <Button title="Verify Email" onPress={verifyEmail} />
-      ) : (
-        <Text>Welcome back, {email}!</Text>
-      )}
-    </View>
-  );
-}
-```
-
-This implementation provides several security enhancements:
-
-1. **Biometric Authentication**: Uses device biometrics (fingerprint/face recognition) to protect the refresh token
-2. **Secure Storage Tiers**: 
-   - Regular tokens (session token, user ID) in AsyncStorage
-   - Sensitive tokens (refresh token) in SecureStore with biometric protection
-3. **Graceful Fallbacks**: Falls back to regular secure storage if biometrics aren't available
-4. **Token Separation**: Keeps session and refresh tokens separate for better security
-5. **Longer-lived Tokens**: Uses longer expiration times for mobile to reduce authentication frequency
-6. **Proper Cleanup**: Ensures tokens are removed from all storage locations on logout
-
-### Mobile-to-Web Authentication
-
-Auth Kit provides a secure way to authenticate mobile app users in web views using signed JWTs. This is useful for scenarios where you want to:
-- Open authenticated web content from your mobile app
-- Share authentication state between mobile and web
-- Provide a hybrid mobile-web experience
-
-Here's how the flow works:
-
-1. **Mobile App**: Generate a signed JWT auth code
-   ```typescript
-   // Mobile App: Request a signed JWT auth code
-   const { code, expiresIn } = await client.getWebAuthCode();
-   ```
-   The server:
-   - Verifies the mobile session token
-   - Creates a signed JWT containing the user's ID
-   - Sets a short expiration (5 minutes)
-   - Signs it with the same secret used for other tokens
-
-2. **Open Web View**: Use the JWT to authenticate
-   ```typescript
-   // Option 1: Using Expo WebBrowser
-   import * as WebBrowser from 'expo-web-browser';
-   await WebBrowser.openAuthSessionAsync(
-     `https://your-web-app.com?code=${code}`
-   );
-   
-   // Option 2: Using React Native's Linking
-   import { Linking } from 'react-native';
-   await Linking.openURL(
-     `https://your-web-app.com?code=${code}`
-   );
-   
-   // Option 3: Using React Native WebView
-   import { WebView } from 'react-native-webview';
-   return (
-     <WebView 
-       source={{ uri: `https://your-web-app.com?code=${code}` }}
-       // Security configuration
-       incognito={true}
-       sharedCookiesEnabled={false}
-       thirdPartyCookiesEnabled={false}
-     />
-   );
-   ```
-
-3. **Server Middleware**: Automatic JWT verification
-   The `withAuth` middleware automatically:
-   1. Detects the JWT auth code in the URL
-   2. Verifies the JWT signature and expiration
-   3. Extracts the user ID from the verified JWT
-   4. Creates new web session tokens with the same user ID
-   5. Sets HTTP-only cookies for the web session
-   6. Redirects to remove the code from URL
-
-Security features:
-- JWTs are cryptographically signed
-- Short expiration (5 minutes)
-- Audience claim verification ("WEB_AUTH")
-- No server-side storage needed
-- All communication requires HTTPS
-- Web sessions use HTTP-only cookies
-- Mobile app verifies web app origin
-- Session tokens are never exposed in URLs
-
-This approach is more secure than OAuth for first-party applications because:
-- No need for complex OAuth flows
-- Direct session transfer using signed JWTs
-- No server-side storage required
-- Reduced attack surface (no callback URLs)
-- Better UX (no consent screens)
-- Same user ID maintained across platforms
-
-Example JWT verification:
-```typescript
-// Inside withAuth middleware
-const webAuthCode = url.searchParams.get('code');
-if (webAuthCode) {
-  try {
-    // Verify the JWT signature and claims
-    const verified = await jwtVerify(
-      webAuthCode, 
-      new TextEncoder().encode(env.AUTH_SECRET),
-      { audience: "WEB_AUTH" }
-    );
-    
-    const payload = verified.payload as { userId: string };
-    if (payload.userId) {
-      // Create new web session with same user ID
-      const sessionId = crypto.randomUUID();
-      const newSessionToken = await createSessionToken(
-        payload.userId, // Same user ID as mobile
-        env.AUTH_SECRET
-      );
-      const newRefreshToken = await createRefreshToken(
-        payload.userId,
-        env.AUTH_SECRET
-      );
-
-      // Redirect and set cookies...
-    }
-  } catch (error) {
-    // JWT verification failed
-    console.error('Failed to verify web auth code:', error);
+  // Override the fetch method from WorkerEntrypoint
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return this.router.handle(request, env);
   }
 }
+
+// Export the worker
+export default AuthWorker;
 ```
 
-The web session maintains the same user identity as the mobile app while using its own session tokens, allowing for independent session management on each platform.
+### Configuring Cloudflare KV
 
-## Architecture
+To use KV with your worker, you need to configure your `wrangler.toml` file:
 
-Auth Kit is comprised of three core components:
+```toml
+name = "auth-kit-example"
+main = "src/index.ts"
+compatibility_date = "2023-10-30"
 
-1. **Server Middleware (`@open-game-collective/auth-kit/server`)**
-   - Handles all `/auth/*` routes automatically.
-   - Manages JWT-based session tokens (15 minutes) and refresh tokens (7 days).
-   - Creates anonymous users when no valid session exists.
-   - Supplies `userId` and `sessionId` to your React Router loaders.
-
-2. **Auth Client (`@open-game-collective/auth-kit/client`)**
-   - Manages client-side auth state.
-   - Automatically refreshes tokens.
-   - Provides methods for email verification and logout.
-   - Supports state subscriptions and pub/sub updates.
-
-3. **React Integration (`@open-game-collective/auth-kit/react`)**
-   - Offers hooks for accessing auth state.
-   - Provides conditional components for loading, authentication, and verification states.
-   - Leverages Suspense for efficient UI updates.
-
-Auth Kit is designed to be deployed with your application server. The auth middleware is integrated into your server, handling authentication for all routes.
-
-```mermaid
-sequenceDiagram
-    participant B as Browser
-    participant S as Server
-    participant D as Database
-
-    B->>S: Request /app
-    S->>S: Auth Middleware
-    S->>D: Check Session
-    D->>S: Session Data
-    S->>B: Response with Auth State
+# Define the KV namespace
+[[kv_namespaces]]
+binding = "AUTH_KV"
+id = "your-kv-namespace-id"
+preview_id = "your-preview-kv-namespace-id"
 ```
 
-### Auth Middleware Setup
-
-The auth middleware is the core of Auth Kit. It handles:
-1. Session validation and renewal
-2. Anonymous user creation
-3. JWT verification
-4. Cookie management
+Then, define your environment interface:
 
 ```typescript
-// server.ts
-import { withAuth } from "@open-game-collective/auth-kit/server";
-
-// Example showing conditional logging based on NODE_ENV
-const handler = withAuth(async (request, env, { userId, sessionId }) => {
-  // Conditionally log auth information in development mode
-  if (process.env.NODE_ENV === 'development') {
-    console.log(`Auth request from user: ${userId}`);
-    console.log(`Session ID: ${sessionId}`);
-    console.log(`Request path: ${new URL(request.url).pathname}`);
-  }
-  
-  // Your application logic here
-  const url = new URL(request.url);
-  
-  if (url.pathname === '/api/protected-data') {
-    // This route is automatically protected by auth middleware
-    return new Response(JSON.stringify({ 
-      data: 'This is protected data',
-      userId 
-    }));
-  }
-  
-  // Serve your application
-  return fetch(request);
-}, {
-  hooks: {
-    // Your auth hooks implementation
-    getUserIdByEmail: async ({ email }) => {
-      // In development, log email verification attempts
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`Looking up user ID for email: ${email}`);
-      }
-      return db.getUserIdByEmail(email);
-    },
-    // Other required hooks...
-  }
-});
-
-export default {
-  fetch: handler
-};
+// env.ts
+export interface Env {
+  AUTH_KV: KVNamespace;
+  AUTH_SECRET: string;
+  SENDGRID_API_KEY: string;
+  GAME_ID?: string; // For consumer apps
+  GAME_NAMES: Record<string, string>; // For provider apps
+}
 ```
 
 For production, you might want to use a more sophisticated logging solution:
@@ -1500,446 +926,148 @@ export const logger = {
 
 // Usage in auth hooks
 const hooks = {
-  verifyVerificationCode: async ({ email, code }) => {
+  verifyVerificationCode: async ({ email, code, env }) => {
     logger.debug('Verifying code', { email, codeLength: code.length });
     // Verification logic...
   }
 };
 ```
 
+### Accessing Auth from Your Application
+
+To integrate the auth system with your application, you can extend the `WorkerEntrypoint` class:
+
+```typescript
+// app/worker.ts (e.g., for Remix, Next.js, etc.)
+import { Env } from "./env";
+import { createRequestHandler } from "@remix-run/cloudflare";
+import * as build from "@remix-run/dev/server-build";
+import { AuthWorker } from "./auth-worker";
+import { WorkerEntrypoint } from "@cloudflare/workers-types";
+import { jwtVerify } from "jose";
+
+export default class AppWorker extends WorkerEntrypoint<Env> {
+  // Create an instance of the AuthWorker
+  private authWorker = new AuthWorker();
+  
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    const url = new URL(request.url);
+    
+    // Handle auth routes with the AuthWorker
+    if (url.pathname.startsWith('/auth/')) {
+      return this.authWorker.fetch(request, env, ctx);
+    }
+    
+    // For non-auth routes, extract auth info from cookies/headers
+    // and pass it to your application
+    const sessionToken = getCookie(request, 'auth_session_token');
+    let authInfo = { isAuthenticated: false };
+    
+    if (sessionToken) {
+      try {
+        // Verify the session token
+        const verified = await verifyToken(sessionToken, env.AUTH_SECRET);
+        if (verified) {
+          authInfo = {
+            isAuthenticated: true,
+            userId: verified.userId,
+            email: verified.email,
+          };
+        }
+      } catch (error) {
+        console.error("Error verifying session token:", error);
+      }
+    }
+    
+    // Pass auth info to your application
+    return createRequestHandler({
+      build,
+      mode: process.env.NODE_ENV,
+      getLoadContext() {
+        return { 
+          env, 
+          auth: authInfo
+        };
+      },
+    })(request);
+  }
+}
+
+// Helper functions for cookies and token verification
+function getCookie(request: Request, name: string): string | undefined {
+  const cookieHeader = request.headers.get("cookie") || request.headers.get("Cookie");
+  if (!cookieHeader) return undefined;
+  
+  const cookies = cookieHeader.split(";").map((cookie) => cookie.trim());
+  const cookie = cookies.find((cookie) => cookie.startsWith(`${name}=`));
+  
+  if (!cookie) return undefined;
+  return decodeURIComponent(cookie.split("=")[1]);
+}
+
+async function verifyToken(token: string, secret: string) {
+  try {
+    const verified = await jwtVerify(token, new TextEncoder().encode(secret));
+    return verified.payload;
+  } catch (error) {
+    return null;
+  }
+}
+```
+
+### Using KV with Auth Kit
+
+Cloudflare KV provides several advantages for implementing Auth Kit hooks:
+
+1. **Global Distribution**: KV data is replicated globally, providing low-latency access from any Cloudflare edge location.
+2. **Shared State**: Unlike Durable Objects, KV allows sharing state across multiple workers and regions.
+3. **Simple API**: KV provides a straightforward key-value API that's easy to use.
+4. **Automatic Expiration**: KV supports automatic expiration for items like verification codes.
+5. **High Read Performance**: KV is optimized for high-performance reads.
+
+### Benefits of the Worker Class Approach
+
+The `WorkerEntrypoint` class implementation shown above offers several advantages:
+
+1. **Standard Cloudflare Pattern**: Using `WorkerEntrypoint` follows the recommended Cloudflare Workers pattern for class-based workers.
+2. **Proper Inheritance**: Extends the base worker class, giving you access to all its features and lifecycle methods.
+3. **Initialization Efficiency**: Hooks are defined only once when the worker is instantiated, not on every request.
+4. **Type Safety**: The generic type parameter `<Env>` ensures proper typing of environment variables.
+5. **Code Organization**: The class structure provides a clean way to organize related functionality.
+6. **Composability**: Makes it easy to compose multiple worker functionalities by extending and delegating.
+7. **Testability**: The class structure makes it easier to write unit tests for your auth implementation.
+8. **Maintainability**: Separating the auth logic into its own class makes the codebase more maintainable.
+
+This approach is particularly beneficial for high-traffic applications where performance is critical. By defining hooks and creating the router only once, you reduce the overhead of each request, resulting in faster response times and lower compute costs.
+
+#### Integration with Auth Kit
+
+To integrate KV with Auth Kit:
+
+1. **Create the KV namespace** in your Cloudflare dashboard or using Wrangler.
+2. **Implement the auth hooks** using KV operations.
+3. **Create the auth router** in your worker's fetch handler.
+4. **Handle auth routes** by checking the URL path.
+
+#### Key Structure for KV
+
+When using KV for auth data, a good key structure helps organize your data:
+
+- `user:{userId}` - User data
+- `email:{email}` - Maps email to userId
+- `verification:{email}` - Verification codes
+- `accountLink:{openGameUserId}:{gameId}` - Account links from provider perspective
+- `gameLink:{gameId}:{gameUserId}` - Account links from consumer perspective
+- `apiKey:{apiKey}` - Maps API keys to game IDs
+
+This structure makes it easy to find and manage related data.
+
 ## API Reference
 
-### Client API
-
-The client provides methods for managing authentication:
-
-```typescript
-interface AuthClient {
-  // Core authentication methods
-  getState(): AuthState;
-  subscribe(callback: (state: AuthState) => void): () => void;
-  requestCode(email: string): Promise<void>;
-  verifyEmail(email: string, code: string): Promise<{ success: boolean }>;
-  logout(): Promise<void>;
-  refresh(): Promise<void>;
-
-  // Mobile-to-web authentication (mobile only)
-  getWebAuthCode(): Promise<{ code: string; expiresIn: number }>;
-}
-```
-
-**Core Methods:**
-
-- `getState()`: Get current authentication state
-- `subscribe(callback)`: Subscribe to state changes
-- `requestCode(email)`: Request email verification code
-- `verifyEmail(email, code)`: Verify email with code
-- `logout()`: Clear session and tokens
-- `refresh()`: Refresh session using refresh token
-
-**Mobile-to-Web Method:**
-
-- `getWebAuthCode()`: Generate a one-time code for web authentication (mobile only)
-  ```typescript
-  const { code, expiresIn } = await client.getWebAuthCode();
-  // code: One-time auth code
-  // expiresIn: Expiration time in seconds (e.g. 300 for 5 minutes)
-  ```
-
-### Provider Client API
-
-The provider client extends the base client with methods for managing linked accounts:
-
-```typescript
-interface ProviderAuthClient extends AuthClient {
-  getLinkedAccounts(): Promise<LinkedAccount[]>;
-  initiateAccountLinking(gameId: string): Promise<{ linkToken: string; expiresAt: string }>;
-  unlinkAccount(gameId: string): Promise<boolean>;
-  getState(): ProviderAuthState;
-  subscribe(callback: (state: ProviderAuthState) => void): () => void;
-}
-```
-
-**Provider-Specific Methods:**
-
-- `getLinkedAccounts()`: Get list of accounts linked to the provider account
-- `initiateAccountLinking(gameId)`: Generate a link token for a specific game
-- `unlinkAccount(gameId)`: Remove link between provider account and game account
-
-### Consumer Client API
-
-The consumer client extends the base client with methods for managing links with the provider:
-
-```typescript
-interface ConsumerAuthClient extends AuthClient {
-  getOpenGameLinkStatus(): Promise<{
-    isLinked: boolean;
-    openGameUserId?: string;
-    linkedAt?: string;
-    profile?: Record<string, any>;
-  }>;
-  verifyLinkToken(token: string): Promise<{
-    valid: boolean;
-    openGameUserId?: string;
-    email?: string;
-  }>;
-  confirmLink(token: string, gameUserId: string): Promise<boolean>;
-  getState(): ConsumerAuthState;
-  subscribe(callback: (state: ConsumerAuthState) => void): () => void;
-}
-```
-
-**Consumer-Specific Methods:**
-
-- `getOpenGameLinkStatus()`: Check if the consumer account is linked with a provider account
-- `verifyLinkToken(token)`: Verify a link token from a provider
-- `confirmLink(token, gameUserId)`: Confirm linking between consumer and provider accounts
-
-### Server API
-
-The server provides two main exports:
-
-1. `createAuthRouter`: Creates an auth router that handles all `/auth/*` endpoints
-2. `withAuth`: Middleware that integrates authentication with your app
-
-**Auth Router Endpoints:**
-
-- `POST /auth/anonymous`: Create anonymous user
-- `POST /auth/request-code`: Request email verification code
-- `POST /auth/verify`: Verify email code
-- `POST /auth/refresh`: Refresh session token
-- `POST /auth/logout`: Clear session
-- `POST /auth/web-code`: Generate one-time web auth code
-
-**Detailed Endpoint Descriptions:**
-
-1. `POST /auth/anonymous`
-   - Creates new anonymous user
-   - Returns: `{ userId, sessionToken, refreshToken }`
-   - Optional body: `{ refreshTokenExpiresIn, sessionTokenExpiresIn }`
-
-2. `POST /auth/request-code`
-   - Requests email verification code
-   - Body: `{ email }`
-   - Returns: `{ success: boolean }`
-
-3. `POST /auth/verify`
-   - Verifies email code
-   - Body: `{ email, code }`
-   - Returns: `{ success, userId, sessionToken, refreshToken }`
-
-4. `POST /auth/refresh`
-   - Refreshes session token using refresh token
-   - No body required (uses refresh token from cookie or header)
-   - Returns: `{ sessionToken }`
-
-5. `POST /auth/logout`
-   - Clears session and refresh tokens
-   - No body required
-   - Returns: `{ success: boolean }`
-
-6. `POST /auth/web-code`
-   - Generates one-time web auth code for mobile-to-web authentication
-   - No body required (uses session token)
-   - Returns: `{ code, expiresIn }`
-
-The middleware automatically handles:
-- Token validation and refresh
-- Session management
-- Error handling
-- Cookie management (for web)
-- Mobile-to-web auth code verification
-- CORS and security headers
-
-**Mobile-to-Web Authentication:**
-For details on the mobile-to-web authentication flow, see the [Mobile-to-Web Authentication](#mobile-to-web-authentication) section above.
-
-For information on security features and benefits compared to OAuth, see the Security Features section in [Mobile-to-Web Authentication](#mobile-to-web-authentication).
-
-For an example of JWT verification code, see the JWT verification example in [Mobile-to-Web Authentication](#mobile-to-web-authentication).
-
-### React API
-
-`createAuthContext()`
-
-Creates a React context for auth state management, providing:
-- A Provider for passing down the auth client.
-- Hooks: `useClient` and `useSelector` for accessing and subscribing to state.
-- Conditional components: `<Loading>`, `<Authenticated>`, `<Verified>`, and `<Unverified>`.
-
-#### Provider API
-
-`createProviderAuthContext()`
-
-Creates a React context specifically for provider authentication, providing:
-- A Provider for passing down the provider auth client.
-- Hooks: `useClient` and `useSelector` for accessing and subscribing to provider state.
-- Components for managing linked accounts:
-  - `<LinkedAccounts>`: Renders children when user has linked accounts
-  - `<NoLinkedAccounts>`: Renders children when user has no linked accounts
-  - `<LinkedAccountsList>`: Renders a function child with linked accounts data
-  - `<InitiateLinking>`: Renders a function child with account linking functionality
-  - `<UnlinkAccount>`: Renders a function child with account unlinking functionality
-
-Example:
-```tsx
-import { createProviderAuthContext } from "@open-game-collective/auth-kit/provider-react";
-import { createProviderAuthClient } from "@open-game-collective/auth-kit/provider-client";
-
-const ProviderAuthContext = createProviderAuthContext();
-const providerClient = createProviderAuthClient({
-  host: "your-api.example.com",
-  userId: "provider-123",
-  sessionToken: "jwt-token"
-});
-
-function App() {
-  return (
-    <ProviderAuthContext.Provider client={providerClient}>
-      {/* Show when user has linked accounts */}
-      <ProviderAuthContext.LinkedAccounts>
-        <h2>Your Linked Accounts</h2>
-        
-        <ProviderAuthContext.LinkedAccountsList>
-          {({ accounts, isLoading, error }) => (
-            <div>
-              {isLoading ? <Spinner /> : (
-                <ul>
-                  {accounts.map(account => (
-                    <li key={account.gameId}>
-                      {account.gameName} - {account.gameUserId}
-                      <ProviderAuthContext.UnlinkAccount gameId={account.gameId}>
-                        {({ onUnlink, isUnlinking, error }) => (
-                          <button 
-                            onClick={onUnlink} 
-                            disabled={isUnlinking}
-                            style={{ marginLeft: '10px' }}
-                          >
-                            {isUnlinking ? "Unlinking..." : "Unlink"}
-                          </button>
-                        )}
-                      </ProviderAuthContext.UnlinkAccount>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {error && <div className="error">{error}</div>}
-            </div>
-          )}
-        </ProviderAuthContext.LinkedAccountsList>
-      </ProviderAuthContext.LinkedAccounts>
-      
-      {/* Show when user has no linked accounts */}
-      <ProviderAuthContext.NoLinkedAccounts>
-        <h2>Link Your First Account</h2>
-        
-        <ProviderAuthContext.InitiateLinking gameId="game-123">
-          {({ onInitiate, isInitiating, error }) => (
-            <div>
-              <button 
-                onClick={async () => {
-                  const { linkToken } = await onInitiate();
-                  console.log("Link with this token:", linkToken);
-                }} 
-                disabled={isInitiating}
-              >
-                {isInitiating ? "Generating Link..." : "Link Account"}
-              </button>
-              {error && <div className="error">{error}</div>}
-            </div>
-          )}
-        </ProviderAuthContext.InitiateLinking>
-      </ProviderAuthContext.NoLinkedAccounts>
-    </ProviderAuthContext.Provider>
-  );
-}
-```
-
-#### Consumer API
-
-`createConsumerAuthContext()`
-
-Creates a React context specifically for consumer (game) authentication, providing:
-- A Provider for passing down the consumer auth client.
-- Hooks: `useClient` and `useSelector` for accessing and subscribing to consumer state.
-- Components for managing open game linking:
-  - `<LinkedWithOpenGame>`: Renders children when user is linked with an open game
-  - `<NotLinkedWithOpenGame>`: Renders children when user is not linked with an open game
-  - `<OpenGameProfile>`: Renders a function child with open game profile data
-  - `<VerifyLinkToken>`: Renders a function child with link token verification functionality
-  - `<ConfirmLink>`: Renders a function child with link confirmation functionality
-
-Example:
-```tsx
-import { createConsumerAuthContext } from "@open-game-collective/auth-kit/consumer-react";
-import { createConsumerAuthClient } from "@open-game-collective/auth-kit/consumer-client";
-
-const ConsumerAuthContext = createConsumerAuthContext();
-const consumerClient = createConsumerAuthClient({
-  host: "your-api.example.com",
-  userId: "game-user-123",
-  sessionToken: "jwt-token"
-});
-
-function App() {
-  return (
-    <ConsumerAuthContext.Provider value={consumerClient}>
-      {/* Show when user is linked with open game */}
-      <ConsumerAuthContext.LinkedWithOpenGame>
-        <h2>Your Open Game Account</h2>
-        
-        <ConsumerAuthContext.OpenGameProfile>
-          {({ profile, isLoading, error }) => (
-            <div>
-              {isLoading ? <Spinner /> : (
-                <div>
-                  <h3>{profile?.displayName || "Anonymous"}</h3>
-                  {profile?.avatarUrl && (
-                    <img src={profile.avatarUrl} alt="Profile" />
-                  )}
-                </div>
-              )}
-              {error && <div className="error">{error}</div>}
-            </div>
-          )}
-        </ConsumerAuthContext.OpenGameProfile>
-      </ConsumerAuthContext.LinkedWithOpenGame>
-      
-      {/* Show when user is not linked with open game */}
-      <ConsumerAuthContext.NotLinkedWithOpenGame>
-        <h2>Link Your Open Game Account</h2>
-        
-        {/* When user has a link token */}
-        {linkToken && (
-          <ConsumerAuthContext.VerifyLinkToken token={linkToken}>
-            {({ isVerifying, isValid, openGameUserId, email, error }) => (
-              <div>
-                {isVerifying ? <Spinner /> : (
-                  isValid ? (
-                    <ConsumerAuthContext.ConfirmLink 
-                      token={linkToken} 
-                      gameUserId="game-user-123"
-                    >
-                      {({ onConfirm, isConfirming, isConfirmed, error }) => (
-                        <div>
-                          <p>Link with {email}?</p>
-                          <button 
-                            onClick={onConfirm} 
-                            disabled={isConfirming || isConfirmed}
-                          >
-                            {isConfirming ? "Linking..." : 
-                             isConfirmed ? "Linked!" : "Confirm Link"}
-                          </button>
-                          {error && <div className="error">{error}</div>}
-                        </div>
-                      )}
-                    </ConsumerAuthContext.ConfirmLink>
-                  ) : (
-                    <div>Invalid or expired link token</div>
-                  )
-                )}
-                {error && <div className="error">{error}</div>}
-              </div>
-            )}
-          </ConsumerAuthContext.VerifyLinkToken>
-        )}
-      </ConsumerAuthContext.NotLinkedWithOpenGame>
-    </ConsumerAuthContext.Provider>
-  );
-}
-```
-
-### Test API
-
-`createAuthMockClient(config)`
-
-Creates a mock auth client for testing. This is useful for testing UI components that depend on auth state without needing a real server.
-
-Example:
-```typescript
-import { createAuthMockClient } from "@open-game-collective/auth-kit/test";
-
-it('shows verified content when user is verified', () => {
-  const mockClient = createAuthMockClient({
-    initialState: {
-      isLoading: false,
-      userId: 'test-user',
-      sessionToken: 'test-session',
-      email: 'user@example.com' // non-null email indicates verified
-    }
-  });
-
-  render(
-    <AuthContext.Provider client={mockClient}>
-      <YourComponent />
-    </AuthContext.Provider>
-  );
-
-  // Test that verified content is shown
-  expect(screen.getByText('Welcome back!')).toBeInTheDocument();
-});
-
-it('handles email verification flow', async () => {
-  const mockClient = createAuthMockClient({
-    initialState: {
-      isLoading: false,
-      userId: 'test-user',
-      sessionToken: 'test-session',
-      email: null // null email indicates unverified
-    }
-  });
-
-  render(
-    <AuthContext.Provider client={mockClient}>
-      <VerificationComponent />
-    </AuthContext.Provider>
-  );
-
-  // Simulate verification flow
-  await userEvent.click(screen.getByText('Verify Email'));
-  
-  // Check that requestCode was called
-  expect(mockClient.requestCode).toHaveBeenCalledWith('test@example.com');
-  
-  // Update mock state to simulate loading
-  mockClient.produce(draft => {
-    draft.isLoading = true;
-  });
-  
-  expect(screen.getByText('Sending code...')).toBeInTheDocument();
-  
-  // Update mock state to simulate success
-  mockClient.produce(draft => {
-    draft.isLoading = false;
-    draft.email = 'test@example.com';
-  });
-  
-  expect(screen.getByText('Email verified!')).toBeInTheDocument();
-});
-```
-
-The mock client provides additional testing utilities:
-
-- `produce(recipe)`: Update the mock client state using a recipe function
-- `getState()`: Get current state
-- All client methods are Vitest spies for tracking calls
-- State changes are synchronous for easier testing
-- No actual network requests are made
-
-## Cookie Domain Options
-
-Auth Kit supports cross-domain cookie functionality through the `useTopLevelDomain` flag:
-
-- `useTopLevelDomain`: When set to `true`, cookies will be set for the top-level domain (e.g., for "api.example.com", cookies will work across "*.example.com"). Defaults to `false`, which means cookies will only work on the exact domain.
-
-This option can be passed to both `createAuthRouter` and `withAuth` functions:
-
-```typescript
-// Example: Using the top-level domain for cookies
-const authRouter = createAuthRouter({
-  hooks,
-  useTopLevelDomain: true // Enables cookies to work across subdomains
-});
-```
-
-Note: When using `useTopLevelDomain`, the domain is automatically derived from the request. For localhost and IP addresses, no domain attribute is set on cookies.
+- [Client API](#client-api)
+- [Provider Client API](#provider-client-api)
+- [Consumer Client API](#consumer-client-api)
+- [Server API](#server-api)
+- [React API](#react-api)
+- [Test API](#test-api)
+- [HTTP Endpoints](#http-endpoints)
