@@ -32,18 +32,29 @@ export interface AuthClient {
 }
 
 // Base auth hooks interface
-export interface AuthHooks<_TEnv = unknown> {
+export interface AuthHooks<TEnv = unknown> {
   // Base auth hooks (required)
-  getUserIdByEmail(email: string): Promise<string | null>;
-  storeVerificationCode(email: string, code: string, expiresAt: Date): Promise<void>;
-  verifyVerificationCode(email: string, code: string): Promise<boolean>;
-  sendVerificationCode(email: string, code: string): Promise<void>;
+  getUserIdByEmail(params: { email: string; env: TEnv }): Promise<string | null>;
+
+  storeVerificationCode(params: {
+    email: string;
+    code: string;
+    expiresAt: Date;
+    env: TEnv;
+  }): Promise<void>;
+
+  verifyVerificationCode(params: { email: string; code: string; env: TEnv }): Promise<boolean>;
+
+  sendVerificationCode(params: { email: string; code: string; env: TEnv }): Promise<void>;
 
   // Base auth hooks (optional)
-  onNewUser?(userId: string, email: string): Promise<void>;
-  onAuthenticate?(userId: string): Promise<void>;
-  onEmailVerified?(userId: string, email: string): Promise<void>;
-  getUserEmail?(userId: string): Promise<string | null>;
+  onNewUser?(params: { userId: string; email: string; env: TEnv }): Promise<void>;
+
+  onAuthenticate?(params: { userId: string; env: TEnv }): Promise<void>;
+
+  onEmailVerified?(params: { userId: string; email: string; env: TEnv }): Promise<void>;
+
+  getUserEmail?(params: { userId: string; env: TEnv }): Promise<string | null>;
 }
 
 export interface RequestState {
@@ -90,26 +101,48 @@ export interface ProviderAuthClient extends AuthClient {
   unlinkAccount(gameId: string): Promise<boolean>;
 }
 
-export interface ProviderAuthHooks {
+export interface ProviderAuthHooks<TEnv = unknown> {
   // Base auth hooks (required)
-  getUserIdByEmail(email: string): Promise<string | null>;
-  storeVerificationCode(email: string, code: string, expiresAt: Date): Promise<void>;
-  verifyVerificationCode(email: string, code: string): Promise<boolean>;
-  sendVerificationCode(email: string, code: string): Promise<void>;
+  getUserIdByEmail(params: { email: string; env: TEnv }): Promise<string | null>;
+
+  storeVerificationCode(params: {
+    email: string;
+    code: string;
+    expiresAt: Date;
+    env: TEnv;
+  }): Promise<void>;
+
+  verifyVerificationCode(params: { email: string; code: string; env: TEnv }): Promise<boolean>;
+
+  sendVerificationCode(params: { email: string; code: string; env: TEnv }): Promise<void>;
 
   // Provider-specific hooks (required)
-  getGameIdFromApiKey(apiKey: string): Promise<string | null>;
-  storeAccountLink(openGameUserId: string, gameId: string, gameUserId: string): Promise<void>;
-  getLinkedAccounts(openGameUserId: string): Promise<LinkedAccount[]>;
+  getGameIdFromApiKey(params: { apiKey: string; env: TEnv }): Promise<string | null>;
+
+  storeAccountLink(params: {
+    openGameUserId: string;
+    gameId: string;
+    gameUserId: string;
+    env: TEnv;
+  }): Promise<void>;
+
+  getLinkedAccounts(params: { openGameUserId: string; env: TEnv }): Promise<LinkedAccount[]>;
 
   // Provider-specific hooks (optional)
-  removeAccountLink?(openGameUserId: string, gameId: string): Promise<boolean>;
+  removeAccountLink?(params: {
+    openGameUserId: string;
+    gameId: string;
+    env: TEnv;
+  }): Promise<boolean>;
 
   // Base auth hooks (optional)
-  onNewUser?(userId: string, email: string): Promise<void>;
-  onAuthenticate?(userId: string): Promise<void>;
-  onEmailVerified?(userId: string, email: string): Promise<void>;
-  getUserEmail?(userId: string): Promise<string | null>;
+  onNewUser?(params: { userId: string; email: string; env: TEnv }): Promise<void>;
+
+  onAuthenticate?(params: { userId: string; env: TEnv }): Promise<void>;
+
+  onEmailVerified?(params: { userId: string; email: string; env: TEnv }): Promise<void>;
+
+  getUserEmail?(params: { userId: string; env: TEnv }): Promise<string | null>;
 }
 
 // Consumer types
@@ -136,25 +169,43 @@ export interface ConsumerAuthClient extends AuthClient {
   confirmLink(token: string, gameUserId: string): Promise<boolean>;
 }
 
-export interface ConsumerAuthHooks {
+export interface ConsumerAuthHooks<TEnv = unknown> {
   // Base auth hooks (required)
-  getUserIdByEmail(email: string): Promise<string | null>;
-  storeVerificationCode(email: string, code: string, expiresAt: Date): Promise<void>;
-  verifyVerificationCode(email: string, code: string): Promise<boolean>;
-  sendVerificationCode(email: string, code: string): Promise<void>;
+  getUserIdByEmail(params: { email: string; env: TEnv }): Promise<string | null>;
+
+  storeVerificationCode(params: {
+    email: string;
+    code: string;
+    expiresAt: Date;
+    env: TEnv;
+  }): Promise<void>;
+
+  verifyVerificationCode(params: { email: string; code: string; env: TEnv }): Promise<boolean>;
+
+  sendVerificationCode(params: { email: string; code: string; env: TEnv }): Promise<void>;
 
   // Consumer-specific hooks (required)
-  storeOpenGameLink(gameUserId: string, openGameUserId: string): Promise<void>;
-  getOpenGameUserId(gameUserId: string): Promise<string | null>;
+  storeOpenGameLink(params: {
+    gameUserId: string;
+    openGameUserId: string;
+    env: TEnv;
+  }): Promise<void>;
+
+  getOpenGameUserId(params: { gameUserId: string; env: TEnv }): Promise<string | null>;
 
   // Consumer-specific hooks (optional)
-  getOpenGameProfile?(openGameUserId: string): Promise<OpenGameLink["profile"] | null>;
+  getOpenGameProfile?(params: { openGameUserId: string; env: TEnv }): Promise<
+    OpenGameLink["profile"] | null
+  >;
 
   // Base auth hooks (optional)
-  onNewUser?(userId: string, email: string): Promise<void>;
-  onAuthenticate?(userId: string): Promise<void>;
-  onEmailVerified?(userId: string, email: string): Promise<void>;
-  getUserEmail?(userId: string): Promise<string | null>;
+  onNewUser?(params: { userId: string; email: string; env: TEnv }): Promise<void>;
+
+  onAuthenticate?(params: { userId: string; env: TEnv }): Promise<void>;
+
+  onEmailVerified?(params: { userId: string; email: string; env: TEnv }): Promise<void>;
+
+  getUserEmail?(params: { userId: string; env: TEnv }): Promise<string | null>;
 }
 
 export interface AuthClientConfig {

@@ -30,6 +30,8 @@ A headless, isomorphic authentication toolkit that runs seamlessly across server
 - [Troubleshooting](#troubleshooting)
 - [TypeScript Types](#typescript-types)
 - [Testing with Storybook](#testing-with-storybook)
+- [Package Structure](#package-structure)
+- [Recent Changes](#recent-changes)
 
 ## Installation
 
@@ -127,11 +129,13 @@ const providerRouter = createProviderAuthRouter({
     storeAccountLink: async ({ openGameUserId, gameId, gameUserId, env }) => { /* ... */ },
     getLinkedAccounts: async ({ openGameUserId, env }) => { /* ... */ },
     removeAccountLink: async ({ openGameUserId, gameId, env }) => { /* ... */ },
-  }
+  },
+  useTopLevelDomain: true, // Optional
+  basePath: "/auth" // Optional, defaults to "/auth"
 });
 
 // Client-side implementation
-import { createProviderAuthClient } from "@open-game-collective/auth-kit/provider";
+import { createProviderAuthClient } from "@open-game-collective/auth-kit/provider/client";
 import { createProviderAuthContext } from "@open-game-collective/auth-kit/provider/react";
 
 const ProviderAuthContext = createProviderAuthContext();
@@ -148,35 +152,22 @@ function AccountLinkingUI() {
         <h2>Your Linked Accounts</h2>
         
         <ProviderAuthContext.LinkedAccountsList>
-          {({ accounts, isLoading, error }) => (
-            <div>
-              {isLoading ? <Spinner /> : (
-                <ul>
-                  {accounts.map(account => (
-                    <li key={account.gameId}>
-                      {account.gameName} - {account.gameUserId}
-                      <ProviderAuthContext.UnlinkAccount gameId={account.gameId}>
-                        {({ onUnlink, isUnlinking, error }) => (
-                          <button 
-                            onClick={onUnlink} 
-                            disabled={isUnlinking}
-                            style={{ marginLeft: '10px' }}
-                          >
-                            {isUnlinking ? "Unlinking..." : "Unlink"}
-                          </button>
-                        )}
-                      </ProviderAuthContext.UnlinkAccount>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {error && <div className="error">{error}</div>}
-            </div>
+          {({ accounts, onUnlink }) => (
+            <ul>
+              {accounts.map(account => (
+                <li key={account.gameId}>
+                  {account.gameId}
+                  <button onClick={() => onUnlink(account.gameId)}>
+                    Unlink
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </ProviderAuthContext.LinkedAccountsList>
       </ProviderAuthContext.LinkedAccounts>
       
-      <ProviderAuthContext.InitiateLinking gameId="game-123">
+      <ProviderAuthContext.InitiateLinking>
         {({ onInitiate, isInitiating, error }) => (
           <button 
             onClick={async () => {
@@ -211,18 +202,21 @@ const consumerRouter = createConsumerAuthRouter({
     getOpenGameUserId: async ({ gameUserId, env }) => { /* ... */ },
     getOpenGameProfile: async ({ openGameUserId, env }) => { /* ... */ },
   },
-  gameId: "your-game-id" // Required for consumer router
+  gameId: "your-game-id", // Required for consumer router
+  useTopLevelDomain: true, // Optional
+  basePath: "/auth" // Optional, defaults to "/auth"
 });
 
 // Client-side implementation
-import { createConsumerAuthClient } from "@open-game-collective/auth-kit/consumer";
+import { createConsumerAuthClient } from "@open-game-collective/auth-kit/consumer/client";
 import { createConsumerAuthContext } from "@open-game-collective/auth-kit/consumer/react";
 
 const ConsumerAuthContext = createConsumerAuthContext();
 const consumerClient = createConsumerAuthClient({
   host: "your-api.example.com",
   userId: "game-user-123",
-  sessionToken: "jwt-token"
+  sessionToken: "jwt-token",
+  gameId: "your-game-id" // Required for consumer client
 });
 
 function LinkVerificationUI({ linkToken }) {
@@ -606,267 +600,1268 @@ In this deployment:
 
 The Auth middleware handles all authentication routes and token management, integrated with your web application.
 
+There are two main approaches to setting up authentication in your application:
+
+#### Approach 1: Using `withAuth` (Recommended for Most Cases)
+
+The `withAuth` middleware provides a complete solution that:
+1. Handles all standard auth routes (like `/auth/verify`, `/auth/request-code`, etc.)
+2. Adds authentication to your custom routes
+3. Manages session validation, token refresh, and anonymous user creation
+
+This is the simplest approach for most applications:
+
 ```typescript
-// auth-worker.ts
-import { AuthHooks, createAuthRouter, Router } from "@open-game-collective/auth-kit/server";
+// app/worker.ts (e.g., for Remix, Next.js, etc.)
+import { withAuth } from "@open-game-collective/auth-kit/server";
 import { Env } from "./env";
+import { createRequestHandler } from "@remix-run/cloudflare";
+import * as build from "@remix-run/dev/server-build";
 import { WorkerEntrypoint } from "@cloudflare/workers-types";
 
-export class AuthWorker extends WorkerEntrypoint<Env> {
-  private router: Router<Env>;
-  private hooks: AuthHooks<Env>;
-
-  constructor() {
-    super();
-    
-    // Define hooks using KV - only defined once when the worker is instantiated
-    this.hooks = {
-      getUserIdByEmail: async ({ email, env }) => {
-        try {
-          const userIdKey = `email:${email}`;
-          return await env.AUTH_KV.get(userIdKey);
-        } catch (error) {
-          console.error("Error getting userId by email:", error);
-          return null;
-        }
-      },
-
-      storeVerificationCode: async ({ email, code, env }) => {
-        try {
-          const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-          const codeData = JSON.stringify({
-            code,
-            expiresAt: expiresAt.toISOString(),
-          });
-          
-          await env.AUTH_KV.put(`verification:${email}`, codeData, {
-            expirationTtl: 600, // 10 minutes in seconds
-          });
-        } catch (error) {
-          console.error("Error storing verification code:", error);
-        }
-      },
-
-      verifyVerificationCode: async ({ email, code, env }) => {
-        try {
-          const codeDataStr = await env.AUTH_KV.get(`verification:${email}`);
-          if (!codeDataStr) return false;
-          
-          const codeData = JSON.parse(codeDataStr);
-          const now = new Date();
-          const expiresAt = new Date(codeData.expiresAt);
-          
-          return codeData.code === code && now < expiresAt;
-        } catch (error) {
-          console.error("Error verifying code:", error);
-          return false;
-        }
-      },
-
-      sendVerificationCode: async ({ email, code, env }) => {
-        try {
-          const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${env.SENDGRID_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              personalizations: [{ to: [{ email }] }],
-              from: { email: "auth@yourdomain.com" },
-              subject: "Your verification code",
-              content: [{ type: "text/plain", value: `Your code is: ${code}` }],
-            }),
-          });
-          return response.ok;
-        } catch (error) {
-          console.error("Failed to send email:", error);
-          return false;
-        }
-      },
-
-      onNewUser: async ({ userId, env }) => {
-        try {
-          await env.AUTH_KV.put(`user:${userId}`, JSON.stringify({
-            userId,
-            createdAt: new Date().toISOString(),
-          }));
-        } catch (error) {
-          console.error("Error creating new user:", error);
-        }
-      },
-
-      onAuthenticate: async ({ userId, env }) => {
-        try {
-          const userDataStr = await env.AUTH_KV.get(`user:${userId}`);
-          if (!userDataStr) return;
-          
-          const userData = JSON.parse(userDataStr);
-          userData.lastLogin = new Date().toISOString();
-          
-          await env.AUTH_KV.put(`user:${userId}`, JSON.stringify(userData));
-        } catch (error) {
-          console.error("Error updating last login:", error);
-        }
-      },
-
-      onEmailVerified: async ({ userId, email, env }) => {
-        try {
-          // Store email to userId mapping
-          await env.AUTH_KV.put(`email:${email}`, userId);
-          
-          // Update user record
-          const userDataStr = await env.AUTH_KV.get(`user:${userId}`);
-          if (!userDataStr) return;
-          
-          const userData = JSON.parse(userDataStr);
-          userData.email = email;
-          userData.emailVerified = true;
-          
-          await env.AUTH_KV.put(`user:${userId}`, JSON.stringify(userData));
-        } catch (error) {
-          console.error("Error verifying email:", error);
-        }
-      },
-      
-      // Provider-specific hooks
-      getGameIdFromApiKey: async ({ apiKey, env }) => {
-        try {
-          return await env.AUTH_KV.get(`apiKey:${apiKey}`);
-        } catch (error) {
-          console.error("Error getting game ID from API key:", error);
-          return null;
-        }
-      },
-      
-      storeAccountLink: async ({ openGameUserId, gameId, gameUserId, env }) => {
-        try {
-          const linkData = {
-            openGameUserId,
-            gameId,
-            gameUserId,
-            linkedAt: new Date().toISOString(),
-          };
-          
-          // Store link in both directions for easy lookup
-          await env.AUTH_KV.put(
-            `accountLink:${openGameUserId}:${gameId}`, 
-            JSON.stringify(linkData)
-          );
-          
-          await env.AUTH_KV.put(
-            `gameLink:${gameId}:${gameUserId}`, 
-            openGameUserId
-          );
-          
-          return true;
-        } catch (error) {
-          console.error("Error storing account link:", error);
-          return false;
-        }
-      },
-      
-      getLinkedAccounts: async ({ openGameUserId, env }) => {
-        try {
-          // List all account links for this user
-          const links = await env.AUTH_KV.list({ prefix: `accountLink:${openGameUserId}:` });
-          
-          // Fetch each link's data
-          const linkedAccounts = await Promise.all(
-            links.keys.map(async (key) => {
-              const linkDataStr = await env.AUTH_KV.get(key.name);
-              if (!linkDataStr) return null;
-              
-              const linkData = JSON.parse(linkDataStr);
-              return {
-                gameId: linkData.gameId,
-                gameUserId: linkData.gameUserId,
-                linkedAt: linkData.linkedAt,
-                gameName: env.GAME_NAMES[linkData.gameId] || linkData.gameId,
-              };
-            })
-          );
-          
-          // Filter out any null values and return
-          return linkedAccounts.filter(Boolean);
-        } catch (error) {
-          console.error("Error getting linked accounts:", error);
-          return [];
-        }
-      },
-      
-      removeAccountLink: async ({ openGameUserId, gameId, env }) => {
-        try {
-          // Get the link data first to get the gameUserId
-          const linkDataStr = await env.AUTH_KV.get(`accountLink:${openGameUserId}:${gameId}`);
-          if (!linkDataStr) return false;
-          
-          const linkData = JSON.parse(linkDataStr);
-          
-          // Delete both link directions
-          await env.AUTH_KV.delete(`accountLink:${openGameUserId}:${gameId}`);
-          await env.AUTH_KV.delete(`gameLink:${gameId}:${linkData.gameUserId}`);
-          
-          return true;
-        } catch (error) {
-          console.error("Error removing account link:", error);
-          return false;
-        }
-      },
-      
-      // Consumer-specific hooks
-      storeOpenGameLink: async ({ gameUserId, openGameUserId, env }) => {
-        try {
-          const linkData = {
-            openGameUserId,
-            gameId: env.GAME_ID,
-            gameUserId,
-            linkedAt: new Date().toISOString(),
-          };
-          
-          // Store link in both directions
-          await env.AUTH_KV.put(
-            `accountLink:${openGameUserId}:${env.GAME_ID}`, 
-            JSON.stringify(linkData)
-          );
-          
-          await env.AUTH_KV.put(
-            `gameLink:${env.GAME_ID}:${gameUserId}`, 
-            openGameUserId
-          );
-          
-          return true;
-        } catch (error) {
-          console.error("Error storing open game link:", error);
-          return false;
-        }
-      },
-      
-      getOpenGameUserId: async ({ gameUserId, env }) => {
-        try {
-          return await env.AUTH_KV.get(`gameLink:${env.GAME_ID}:${gameUserId}`);
-        } catch (error) {
-          console.error("Error getting open game user ID:", error);
-          return null;
-        }
-      }
-    };
-    
-    // Create the router once during initialization
-    this.router = createAuthRouter({
-      hooks: this.hooks,
-      useTopLevelDomain: true
-    });
-  }
+// Define hooks outside the worker class - they're only defined once when the module is loaded
+const authHooks = {
+  getUserIdByEmail: async ({ email, env }) => {
+    try {
+      const userIdKey = `email:${email}`;
+      return await env.AUTH_KV.get(userIdKey);
+    } catch (error) {
+      console.error("Error getting userId by email:", error);
+      return null;
+    }
+  },
   
-  // Override the fetch method from WorkerEntrypoint
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return this.router.handle(request, env);
+  // ... other hooks implementation ...
+};
+
+// Create the auth middleware once when the module is loaded
+// This handles BOTH auth routes AND your application routes
+const authMiddleware = withAuth(
+  async (request: Request, env: Env, { userId, sessionId, sessionToken }) => {
+    // This handler runs for non-auth routes
+    // Auth routes like /auth/* are handled automatically by the middleware
+    
+    const url = new URL(request.url);
+    
+    if (url.pathname === '/dashboard') {
+      return new Response(`Hello, user ${userId}! This is your dashboard.`);
+    }
+    
+    if (url.pathname === '/profile') {
+      return new Response(`Hello, user ${userId}! This is your profile.`);
+    }
+    
+    // Default route
+    return new Response(`Hello, user ${userId}!`);
+  },
+  {
+    hooks: authHooks,
+    useTopLevelDomain: true,
+    basePath: "/auth"
   }
-}
+);
 
 // Export the worker
-export default AuthWorker;
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // All requests go through the auth middleware
+    return authMiddleware(request, env, ctx);
+  }
+} satisfies WorkerEntrypoint;
+```
+
+#### Approach 2: Separate Auth Router (For More Control)
+
+If you need more control over how auth routes are handled, you can create a separate auth router:
+
+```typescript
+// app/worker.ts (e.g., for Remix, Next.js, etc.)
+import { AuthHooks, createAuthRouter } from "@open-game-collective/auth-kit/server";
+import { Env } from "./env";
+import { createRequestHandler } from "@remix-run/cloudflare";
+import * as build from "@remix-run/dev/server-build";
+import { WorkerEntrypoint } from "@cloudflare/workers-types";
+
+// Define hooks outside the worker class - they're only defined once when the module is loaded
+const authHooks: AuthHooks<Env> = {
+  // ... hooks implementation ...
+};
+
+// Create the auth router once when the module is loaded
+const authRouter = createAuthRouter({
+  hooks: authHooks,
+  useTopLevelDomain: true,
+  basePath: "/auth"
+});
+
+// Export the worker
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    
+    // Handle auth routes
+    if (url.pathname.startsWith('/auth/')) {
+      return authRouter(request, env, ctx);
+    }
+    
+    // Handle app routes with Remix
+    const remixHandler = createRequestHandler({
+      build,
+      mode: process.env.NODE_ENV,
+      getLoadContext: () => ({ env })
+    });
+    
+    return remixHandler(request, env, ctx);
+  }
+} satisfies WorkerEntrypoint;
+```
+
+This approach requires you to manually handle authentication for your application routes if needed.
+
+### Using the withAuth Middleware
+
+The `withAuth` middleware provides a convenient way to add authentication to any request handler. It automatically handles:
+
+1. **Auth Routes**: All standard auth endpoints like `/auth/verify`, `/auth/request-code`, etc.
+2. **Session Validation**: Verifies session tokens and refreshes them when needed
+3. **Anonymous Users**: Creates anonymous users for new visitors
+4. **Auth Context**: Passes authentication information to your handler
+
+Here are examples for different types of applications:
+
+#### Base Auth withAuth
+
+```typescript
+import { withAuth } from "@open-game-collective/auth-kit/server";
+import { Env } from "./env";
+
+// Define your hooks
+const authHooks = { /* ... */ };
+
+// Create the middleware once when the module is loaded
+const authMiddleware = withAuth(
+  async (request: Request, env: Env, { userId, sessionId, sessionToken }) => {
+    // This handler runs for non-auth routes
+    // Auth routes like /auth/* are handled automatically by the middleware
+    
+    const url = new URL(request.url);
+    
+    if (url.pathname === '/dashboard') {
+      return new Response(`Hello, user ${userId}! This is your dashboard.`);
+    }
+    
+    if (url.pathname === '/profile') {
+      return new Response(`Hello, user ${userId}! This is your profile.`);
+    }
+    
+    // Default route
+    return new Response(`Hello, user ${userId}!`);
+  },
+  {
+    hooks: authHooks,
+    useTopLevelDomain: true,
+    basePath: "/auth"
+  }
+);
+
+// Use in your fetch handler
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // All requests go through the auth middleware
+    return authMiddleware(request, env, ctx);
+  }
+};
+```
+
+#### Provider Auth withAuth
+
+For provider applications that need account linking functionality:
+
+```typescript
+import { withAuth } from "@open-game-collective/auth-kit/provider/server";
+import { Env } from "./env";
+
+// Define provider hooks
+const providerHooks = {
+  // Base auth hooks
+  getUserIdByEmail: async ({ email, env }) => { /* ... */ },
+  storeVerificationCode: async ({ email, code, expiresAt, env }) => { /* ... */ },
+  verifyVerificationCode: async ({ email, code, env }) => { /* ... */ },
+  sendVerificationCode: async ({ email, code, env }) => { /* ... */ },
+  
+  // Provider-specific hooks
+  getGameIdFromApiKey: async ({ apiKey, env }) => { /* ... */ },
+  storeAccountLink: async ({ openGameUserId, gameId, gameUserId, env }) => { /* ... */ },
+  getLinkedAccounts: async ({ openGameUserId, env }) => { /* ... */ },
+  removeAccountLink: async ({ openGameUserId, gameId, env }) => { /* ... */ }
+};
+
+// Create the middleware once when the module is loaded
+const providerAuthMiddleware = withAuth(
+  async (request: Request, env: Env, { userId, sessionId, sessionToken }) => {
+    // This handler runs for non-auth routes
+    // Auth routes like /auth/* are handled automatically by the middleware
+    
+    const url = new URL(request.url);
+    
+    if (url.pathname === '/provider/dashboard') {
+      // You can get linked accounts for this user
+      const linkedAccounts = await providerHooks.getLinkedAccounts({ 
+        openGameUserId: userId, 
+        env 
+      });
+      
+      return new Response(`Hello, provider user ${userId}! You have ${linkedAccounts.length} linked accounts.`);
+    }
+    
+    // Default route
+    return new Response(`Hello, provider user ${userId}!`);
+  },
+  {
+    hooks: providerHooks,
+    useTopLevelDomain: true,
+    basePath: "/auth"
+  }
+);
+
+// Use in your fetch handler
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // All requests go through the provider auth middleware
+    // - Provider auth routes like /auth/linked-accounts are handled automatically
+    // - Other routes get authentication and are passed to your handler
+    return providerAuthMiddleware(request, env, ctx);
+  }
+};
+```
+
+#### Consumer Auth withAuth
+
+For consumer applications that need to link with a provider:
+
+```typescript
+import { withAuth } from "@open-game-collective/auth-kit/consumer/server";
+import { Env } from "./env";
+
+// Define consumer hooks
+const consumerHooks = {
+  // Base auth hooks
+  getUserIdByEmail: async ({ email, env }) => { /* ... */ },
+  storeVerificationCode: async ({ email, code, expiresAt, env }) => { /* ... */ },
+  verifyVerificationCode: async ({ email, code, env }) => { /* ... */ },
+  sendVerificationCode: async ({ email, code, env }) => { /* ... */ },
+  
+  // Consumer-specific hooks
+  storeOpenGameLink: async ({ gameUserId, openGameUserId, env }) => { /* ... */ },
+  getOpenGameUserId: async ({ gameUserId, env }) => { /* ... */ },
+  getOpenGameProfile: async ({ openGameUserId, env }) => { /* ... */ }
+};
+
+// Create the middleware once when the module is loaded
+const consumerAuthMiddleware = withAuth(
+  async (request: Request, env: Env, { userId, sessionId, sessionToken }) => {
+    // This handler runs for non-auth routes
+    // Auth routes like /auth/* are handled automatically by the middleware
+    
+    const url = new URL(request.url);
+    
+    if (url.pathname === '/game/profile') {
+      // You can check if this user is linked with OpenGame
+      const openGameUserId = await consumerHooks.getOpenGameUserId({ 
+        gameUserId: userId, 
+        env 
+      });
+      
+      if (openGameUserId) {
+        const profile = await consumerHooks.getOpenGameProfile?.({ 
+          openGameUserId, 
+          env 
+        }) || null;
+        
+        return new Response(`Hello, game user ${userId}! You're linked with OpenGame user ${openGameUserId}.`);
+      }
+      
+      return new Response(`Hello, game user ${userId}! You're not linked with OpenGame yet.`);
+    }
+    
+    // Default route
+    return new Response(`Hello, game user ${userId}!`);
+  },
+  {
+    hooks: consumerHooks,
+    gameId: "your-game-id", // Required for consumer
+    useTopLevelDomain: true,
+    basePath: "/auth"
+  }
+);
+
+// Use in your fetch handler
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // All requests go through the consumer auth middleware
+    // - Consumer auth routes like /auth/opengame-link are handled automatically
+    // - Other routes get authentication and are passed to your handler
+    return consumerAuthMiddleware(request, env, ctx);
+  }
+};
+```
+
+This approach offers several advantages:
+
+1. **Simplified Structure**: No need for a separate `AuthWorker` class.
+2. **Initialization Efficiency**: Hooks are defined only once when the module is loaded, not on every request.
+3. **Direct Integration**: Auth router is created and used directly in the main application entrypoint.
+4. **Reduced Complexity**: Fewer moving parts and clearer flow of execution.
+5. **Same Benefits**: Still maintains all the benefits of the previous approach.
+
+### Configuring Cloudflare KV
+
+To use KV with your worker, you need to configure your `wrangler.toml` file:
+
+```toml
+name = "auth-kit-example"
+main = "src/index.ts"
+compatibility_date = "2023-10-30"
+
+# Define the KV namespace
+[[kv_namespaces]]
+binding = "AUTH_KV"
+id = "your-kv-namespace-id"
+preview_id = "your-preview-kv-namespace-id"
+```
+
+Then, define your environment interface:
+
+```typescript
+// env.ts
+export interface Env {
+  AUTH_KV: KVNamespace;
+  AUTH_SECRET: string;
+  SENDGRID_API_KEY: string;
+  GAME_ID?: string; // For consumer apps
+  GAME_NAMES: Record<string, string>; // For provider apps
+}
+```
+
+For production, you might want to use a more sophisticated logging solution:
+
+```typescript
+// logger.ts
+export const logger = {
+  debug: (message: string, ...args: any[]) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[DEBUG] ${message}`, ...args);
+    }
+  },
+  info: (message: string, ...args: any[]) => {
+    console.log(`[INFO] ${message}`, ...args);
+  },
+  warn: (message: string, ...args: any[]) => {
+    console.warn(`[WARN] ${message}`, ...args);
+  },
+  error: (message: string, error?: Error, ...args: any[]) => {
+    console.error(`[ERROR] ${message}`, error, ...args);
+    
+    // In production, you might want to send errors to a monitoring service
+    if (process.env.NODE_ENV === 'production' && typeof process.env.SENTRY_DSN === 'string') {
+      // Send to error monitoring
+    }
+  }
+};
+
+// Usage in auth hooks
+const hooks = {
+  verifyVerificationCode: async ({ email, code, env }) => {
+    logger.debug('Verifying code', { email, codeLength: code.length });
+    // Verification logic...
+  }
+};
+```
+
+### Key Structure for KV
+
+When using KV for auth data, a good key structure helps organize your data:
+
+- `user:{userId}` - User data
+- `email:{email}` - Maps email to userId
+- `verification:{email}` - Verification codes
+- `accountLink:{openGameUserId}:{gameId}` - Account links from provider perspective
+- `gameLink:{gameId}:{gameUserId}` - Account links from consumer perspective
+- `apiKey:{apiKey}` - Maps API keys to game IDs
+
+This structure makes it easy to find and manage related data.
+
+For provider or consumer-specific functionality, you would use the corresponding router:
+
+```typescript
+// For provider functionality
+import { createProviderAuthRouter } from "@open-game-collective/auth-kit/provider/server";
+
+// Define provider-specific hooks...
+const providerHooks = {
+  // Base auth hooks...
+  
+  // Provider-specific hooks
+  getGameIdFromApiKey: async ({ apiKey, env }) => { /* ... */ },
+  storeAccountLink: async ({ openGameUserId, gameId, gameUserId, env }) => { /* ... */ },
+  getLinkedAccounts: async ({ openGameUserId, env }) => { /* ... */ },
+  removeAccountLink: async ({ openGameUserId, gameId, env }) => { /* ... */ }
+};
+
+// In your fetch handler
+if (url.pathname.startsWith('/auth/')) {
+  return createProviderAuthRouter({
+    hooks: providerHooks,
+    useTopLevelDomain: true,
+    basePath: "/auth"
+  })(request, env, ctx);
+}
+```
+
+```typescript
+// For consumer functionality
+import { createConsumerAuthRouter } from "@open-game-collective/auth-kit/consumer/server";
+
+// Define consumer-specific hooks...
+const consumerHooks = {
+  // Base auth hooks...
+  
+  // Consumer-specific hooks
+  storeOpenGameLink: async ({ gameUserId, openGameUserId, env }) => { /* ... */ },
+  getOpenGameUserId: async ({ gameUserId, env }) => { /* ... */ },
+  getOpenGameProfile: async ({ openGameUserId, env }) => { /* ... */ }
+};
+
+// In your fetch handler
+if (url.pathname.startsWith('/auth/')) {
+  return createConsumerAuthRouter({
+    hooks: consumerHooks,
+    gameId: env.GAME_ID, // Required for consumer router
+    useTopLevelDomain: true,
+    basePath: "/auth"
+  })(request, env, ctx);
+}
+```
+
+**Auth Endpoints:**
+
+- `POST /auth/anonymous`: Create anonymous user
+- `POST /auth/request-code`: Request email verification code
+- `POST /auth/verify`: Verify email code
+- `POST /auth/refresh`: Refresh session token
+- `POST /auth/logout`: Clear session
+- `POST /auth/web-code`: Generate one-time web auth code
+
+**Provider Endpoints:**
+
+- `GET /auth/linked-accounts`: Get linked accounts
+- `POST /auth/account-link-token`: Create account link token
+- `DELETE /auth/linked-accounts/:gameId`: Unlink account
+- `POST /auth/verify-link-token`: Verify link token from consumer
+- `POST /auth/confirm-link`: Confirm account link
+
+**Consumer Endpoints:**
+
+- `GET /auth/opengame-link`: Get OpenGame link status
+- `POST /auth/verify-link-token`: Verify link token
+- `POST /auth/confirm-link`: Confirm account link
+
+### React API
+
+`createAuthContext()`
+
+Creates a React context for auth state management, providing:
+- A Provider for passing down the auth client.
+- Hooks: `useClient` and `useSelector` for accessing and subscribing to state.
+- Conditional components: `<Loading>`, `<Authenticated>`, `<Verified>`, and `<Unverified>`.
+
+```typescript
+import { createAuthContext } from '@open-game-collective/auth-kit/react';
+import { createAuthClient } from '@open-game-collective/auth-kit/client';
+
+const AuthContext = createAuthContext();
+const client = createAuthClient({
+  host: 'your-api.example.com',
+  userId: 'user-123',
+  sessionToken: 'jwt-token'
+});
+
+function App() {
+  return (
+    <AuthContext.Provider client={client}>
+      <AuthContext.Loading>
+        <LoadingSpinner />
+      </AuthContext.Loading>
+      
+      <AuthContext.Verified>
+        <VerifiedUserDashboard />
+      </AuthContext.Verified>
+      
+      <AuthContext.Unverified>
+        <EmailVerificationForm />
+      </AuthContext.Unverified>
+    </AuthContext.Provider>
+  );
+}
+```
+
+**Using the useSelector Hook:**
+
+```typescript
+function UserGreeting() {
+  const email = AuthContext.useSelector(state => state.email);
+  
+  return (
+    <h1>
+      {email 
+        ? `Welcome back, ${email}!` 
+        : 'Welcome! Please verify your email.'}
+    </h1>
+  );
+}
+```
+
+#### Provider React API
+
+`createProviderAuthContext()`
+
+Creates a React context specifically for provider authentication, providing:
+- A Provider for passing down the provider auth client.
+- Hooks: `useClient` and `useSelector` for accessing and subscribing to provider state.
+- Components for managing linked accounts:
+  - `<LinkedAccounts>`: Renders children when user has linked accounts
+  - `<NoLinkedAccounts>`: Renders children when user has no linked accounts
+  - `<LinkedAccountsList>`: Renders a function child with linked accounts data
+  - `<InitiateLinking>`: Renders a function child with account linking functionality
+  - `<UnlinkAccount>`: Renders a function child with account unlinking functionality
+
+#### Consumer React API
+
+`createConsumerAuthContext()`
+
+Creates a React context specifically for consumer (game) authentication, providing:
+- A Provider for passing down the consumer auth client.
+- Hooks: `useClient` and `useSelector` for accessing and subscribing to consumer state.
+- Components for managing open game linking:
+  - `<LinkedWithOpenGame>`: Renders children when user is linked with an open game
+  - `<NotLinkedWithOpenGame>`: Renders children when user is not linked with an open game
+  - `<OpenGameProfile>`: Renders a function child with open game profile data
+  - `<VerifyLinkToken>`: Renders a function child with link token verification functionality
+  - `<ConfirmLink>`: Renders a function child with link confirmation functionality
+
+### Test API
+
+`createAuthMockClient(config)`
+
+Creates a mock auth client for testing. This is useful for testing UI components that depend on auth state without needing a real server.
+
+```typescript
+import { createAuthMockClient } from '@open-game-collective/auth-kit/test';
+
+it('shows verified content when user is verified', () => {
+  const mockClient = createAuthMockClient({
+    initialState: {
+      isLoading: false,
+      userId: 'test-user',
+      sessionToken: 'test-session',
+      email: 'user@example.com' // non-null email indicates verified
+    }
+  });
+
+  render(
+    <AuthContext.Provider client={mockClient}>
+      <YourComponent />
+    </AuthContext.Provider>
+  );
+
+  // Test that verified content is shown
+  expect(screen.getByText('Welcome back!')).toBeInTheDocument();
+});
+```
+
+**Provider and Consumer Mock Clients:**
+
+```typescript
+import { 
+  createProviderAuthMockClient,
+  createConsumerAuthMockClient
+} from '@open-game-collective/auth-kit/test';
+
+// Provider mock client
+const providerMockClient = createProviderAuthMockClient({
+  initialState: {
+    linkedAccounts: [
+      { gameId: 'game-123', gameUserId: 'user-456', linkedAt: '2023-01-01T00:00:00Z' }
+    ]
+  }
+});
+
+// Consumer mock client
+const consumerMockClient = createConsumerAuthMockClient({
+  initialState: {
+    openGameLink: {
+      openGameUserId: 'og-123',
+      linkedAt: '2023-01-01T00:00:00Z'
+    }
+  }
+});
+```
+
+The mock clients provide additional testing utilities:
+
+- `produce(recipe)`: Update the mock client state using a recipe function
+- `getState()`: Get current state
+- All client methods are test spies for tracking calls
+- State changes are synchronous for easier testing
+- No actual network requests are made
+
+## Package Structure
+
+Auth Kit is organized into several modules to provide a clean separation of concerns:
+
+```
+@open-game-collective/auth-kit/
+├── client                 # Base client for authentication
+├── react                  # React integration for base auth
+├── server                 # Base server for authentication
+├── test                   # Testing utilities
+├── provider/
+│   ├── client             # Provider-specific client
+│   ├── react              # Provider-specific React integration
+│   └── server             # Provider-specific server
+└── consumer/
+    ├── client             # Consumer-specific client
+    ├── react              # Consumer-specific React integration
+    └── server             # Consumer-specific server
+```
+
+This structure allows you to import only what you need for your specific use case:
+
+```typescript
+// Base authentication
+import { createAuthClient } from '@open-game-collective/auth-kit/client';
+import { createAuthContext } from '@open-game-collective/auth-kit/react';
+import { createAuthRouter } from '@open-game-collective/auth-kit/server';
+
+// Provider-specific (OpenGame)
+import { createProviderAuthClient } from '@open-game-collective/auth-kit/provider/client';
+import { createProviderAuthContext } from '@open-game-collective/auth-kit/provider/react';
+import { createProviderAuthRouter } from '@open-game-collective/auth-kit/provider/server';
+
+// Consumer-specific (Games)
+import { createConsumerAuthClient } from '@open-game-collective/auth-kit/consumer/client';
+import { createConsumerAuthContext } from '@open-game-collective/auth-kit/consumer/react';
+import { createConsumerAuthRouter } from '@open-game-collective/auth-kit/consumer/server';
+```
+
+## Recent Changes
+
+### v0.0.11
+
+- **Code Organization**: Improved code structure with better separation of concerns
+  - Moved provider-specific code to `provider-server.ts`
+  - Moved consumer-specific code to `consumer-server.ts`
+  - Kept base authentication code in `server.ts`
+  - Shared helper functions are exported from `server.ts` and imported into other files
+
+- **Package Exports**: Added explicit exports for provider and consumer modules
+  - Added exports for `./provider/server` pointing to `provider-server.ts`
+  - Added exports for `./consumer/server` pointing to `consumer-server.ts`
+  - Maintained backward compatibility with existing imports
+
+- **Bug Fixes**:
+  - Fixed JWT token handling in tests to properly mock the SignJWT class
+  - Improved error handling in the `createLinkToken` function
+  - Fixed unused variables and parameters
+  - Removed unnecessary else clauses for cleaner code
+  - Standardized code formatting
+
+- **Testing Improvements**:
+  - Enhanced test mocks for better reliability
+  - Fixed test failures related to account linking
+  - Added special handling for test environments in token creation
+
+These changes improve the maintainability of the codebase, reduce duplication, and ensure that all tests pass successfully.
+
+## API Reference
+
+### Client API
+
+The client provides methods for managing authentication:
+
+```typescript
+interface AuthClient {
+  // Core authentication methods
+  getState(): AuthState;
+  subscribe(callback: (state: AuthState) => void): () => void;
+  requestCode(email: string): Promise<void>;
+  verifyEmail(email: string, code: string): Promise<{ success: boolean }>;
+  logout(): Promise<void>;
+  refresh(): Promise<void>;
+
+  // Mobile-to-web authentication (mobile only)
+  getWebAuthCode(): Promise<{ code: string; expiresIn: number }>;
+}
+```
+
+**Core Methods:**
+
+- `getState()`: Get current authentication state
+- `subscribe(callback)`: Subscribe to state changes
+- `requestCode(email)`: Request email verification code
+- `verifyEmail(email, code)`: Verify email with code
+- `logout()`: Clear session and tokens
+- `refresh()`: Refresh session using refresh token
+
+**Mobile-to-Web Method:**
+
+- `getWebAuthCode()`: Generate a one-time code for web authentication (mobile only)
+  ```typescript
+  const { code, expiresIn } = await client.getWebAuthCode();
+  // code: One-time auth code
+  // expiresIn: Expiration time in seconds (e.g. 300 for 5 minutes)
+  ```
+
+**Creating a Client:**
+
+```typescript
+import { createAuthClient } from '@open-game-collective/auth-kit/client';
+
+const client = createAuthClient({
+  host: 'your-api.example.com',
+  userId: 'user-123',
+  sessionToken: 'jwt-token',
+  // Optional initial state
+  initialState: {
+    email: 'user@example.com',
+    isLoading: false,
+    error: null
+  }
+});
+```
+
+**Creating an Anonymous User:**
+
+```typescript
+import { createAnonymousUser } from '@open-game-collective/auth-kit/client';
+
+const { userId, sessionToken } = await createAnonymousUser({
+  host: 'your-api.example.com',
+  // Optional parameters
+  refreshTokenExpiresIn: '7d',
+  sessionTokenExpiresIn: '15m'
+});
+```
+
+### Provider Client API
+
+The provider client extends the base client with methods for managing linked accounts:
+
+```typescript
+interface ProviderAuthClient extends AuthClient {
+  getLinkedAccounts(): Promise<LinkedAccount[]>;
+  initiateAccountLinking(gameId: string): Promise<{ linkToken: string; expiresAt: string }>;
+  unlinkAccount(gameId: string): Promise<boolean>;
+  getState(): ProviderAuthState;
+  subscribe(callback: (state: ProviderAuthState) => void): () => void;
+}
+```
+
+**Provider-Specific Methods:**
+
+- `getLinkedAccounts()`: Get list of accounts linked to the provider account
+- `initiateAccountLinking(gameId)`: Generate a link token for a specific game
+- `unlinkAccount(gameId)`: Remove link between provider account and game account
+
+**Creating a Provider Client:**
+
+```typescript
+import { createProviderAuthClient } from '@open-game-collective/auth-kit/provider/client';
+
+const providerClient = createProviderAuthClient({
+  host: 'your-api.example.com',
+  userId: 'provider-123',
+  sessionToken: 'jwt-token',
+  // Optional initial state
+  initialState: {
+    linkedAccounts: [],
+    requests: {}
+  }
+});
+```
+
+### Consumer Client API
+
+The consumer client extends the base client with methods for managing links with the provider:
+
+```typescript
+interface ConsumerAuthClient extends AuthClient {
+  getOpenGameLinkStatus(): Promise<{
+    isLinked: boolean;
+    openGameUserId?: string;
+    linkedAt?: string;
+    profile?: Record<string, any>;
+  }>;
+  verifyLinkToken(token: string): Promise<{
+    valid: boolean;
+    openGameUserId?: string;
+    email?: string;
+  }>;
+  confirmLink(token: string, gameUserId: string): Promise<boolean>;
+  getState(): ConsumerAuthState;
+  subscribe(callback: (state: ConsumerAuthState) => void): () => void;
+}
+```
+
+**Consumer-Specific Methods:**
+
+- `getOpenGameLinkStatus()`: Check if the consumer account is linked with a provider account
+- `verifyLinkToken(token)`: Verify a link token from a provider
+- `confirmLink(token, gameUserId)`: Confirm linking between consumer and provider accounts
+
+**Creating a Consumer Client:**
+
+```typescript
+import { createConsumerAuthClient } from '@open-game-collective/auth-kit/consumer/client';
+
+const consumerClient = createConsumerAuthClient({
+  host: 'your-api.example.com',
+  userId: 'game-user-123',
+  sessionToken: 'jwt-token',
+  gameId: 'your-game-id', // Required for consumer client
+  // Optional initial state
+  initialState: {
+    openGameLink: undefined,
+    requests: {}
+  }
+});
+```
+
+### Server API
+
+The server provides three main exports for each type of server (base, provider, and consumer):
+
+1. **Router Creation**:
+   - `createAuthRouter`: Creates a base auth router that handles all auth endpoints
+   - `createProviderAuthRouter`: Creates a provider auth router for account linking
+   - `createConsumerAuthRouter`: Creates a consumer auth router for OpenGame linking
+
+2. **Authentication Middleware**:
+   - `withAuth` (from `/server`): Middleware that integrates base authentication with your app
+   - `withAuth` (from `/provider/server`): Middleware for provider authentication
+   - `withAuth` (from `/consumer/server`): Middleware for consumer authentication
+
+**Important**: The `withAuth` middleware handles both auth routes (like `/auth/*`) AND your custom routes. In most cases, you only need to use `withAuth` without a separate auth router.
+
+**Creating an Auth Router (When You Need Separate Control):**
+
+```typescript
+import { createAuthRouter } from '@open-game-collective/auth-kit/server';
+
+// Create the router once when the module is loaded
+const authRouter = createAuthRouter({
+  hooks: {
+    // Required hooks
+    getUserIdByEmail: async ({ email, env }) => { /* ... */ },
+    storeVerificationCode: async ({ email, code, expiresAt, env }) => { /* ... */ },
+    verifyVerificationCode: async ({ email, code, env }) => { /* ... */ },
+    sendVerificationCode: async ({ email, code, env }) => { /* ... */ },
+    
+    // Optional hooks
+    onNewUser: async ({ userId, env }) => { /* ... */ },
+    onAuthenticate: async ({ userId, env }) => { /* ... */ },
+    onEmailVerified: async ({ userId, email, env }) => { /* ... */ },
+    getUserEmail: async ({ userId, env }) => { /* ... */ }
+  },
+  useTopLevelDomain: true, // Optional, enables cookies to work across subdomains
+  basePath: "/auth" // Optional, defaults to "/auth", customize the base URL path for all auth endpoints
+});
+
+// Use the router in your fetch handler
+async function handleRequest(request: Request, env: Env, ctx: ExecutionContext) {
+  const url = new URL(request.url);
+  
+  // Only handle auth routes with the router
+  if (url.pathname.startsWith('/auth/')) {
+    return authRouter(request, env, ctx);
+  }
+  
+  // Handle app routes separately
+  // Note: These routes won't have authentication
+  return new Response('Hello World');
+}
+```
+
+**Using the withAuth Middleware (Recommended):**
+
+```typescript
+import { withAuth } from '@open-game-collective/auth-kit/server';
+
+// Create the middleware once when the module is loaded
+const authMiddleware = withAuth(
+  async (request, env, { userId, sessionId, sessionToken }) => {
+    // This handler runs for non-auth routes
+    // Auth routes like /auth/* are handled automatically by the middleware
+    
+    const url = new URL(request.url);
+    
+    if (url.pathname === '/dashboard') {
+      return new Response(`Hello, user ${userId}! This is your dashboard.`);
+    }
+    
+    // Default route
+    return new Response(`Hello, user ${userId}!`);
+  },
+  {
+    hooks: {
+      // Same hooks as createAuthRouter
+      getUserIdByEmail: async ({ email, env }) => { /* ... */ },
+      // ... other hooks
+    },
+    useTopLevelDomain: true, // Optional
+    basePath: "/auth" // Optional, defaults to "/auth"
+  }
+);
+
+// Use the middleware in your fetch handler
+async function handleRequest(request, env, ctx) {
+  // All requests go through the auth middleware
+  // - Auth routes like /auth/* are handled automatically
+  // - Other routes get authentication and are passed to your handler
+  return authMiddleware(request, env, ctx);
+}
+```
+
+**Provider Router and Middleware:**
+
+```typescript
+import { createProviderAuthRouter, withAuth } from '@open-game-collective/auth-kit/provider/server';
+
+// Option 1: Create a separate provider router (when you need separate control)
+const providerRouter = createProviderAuthRouter({
+  hooks: {
+    // Base auth hooks
+    // ...
+    
+    // Provider-specific hooks
+    getGameIdFromApiKey: async ({ apiKey, env }) => { /* ... */ },
+    storeAccountLink: async ({ openGameUserId, gameId, gameUserId, env }) => { /* ... */ },
+    getLinkedAccounts: async ({ openGameUserId, env }) => { /* ... */ },
+    removeAccountLink: async ({ openGameUserId, gameId, env }) => { /* ... */ }
+  },
+  useTopLevelDomain: true, // Optional
+  basePath: "/auth" // Optional
+});
+
+// Option 2: Create provider-specific authenticated middleware (recommended)
+const providerAuthMiddleware = withAuth(
+  async (request, env, { userId, sessionId, sessionToken }) => {
+    // This handler runs for non-auth routes
+    // Auth routes like /auth/* are handled automatically by the middleware
+    
+    const url = new URL(request.url);
+    
+    if (url.pathname === '/dashboard') {
+      return new Response(`Hello, provider user ${userId}!`);
+    }
+    
+    // Default route
+    return new Response('Hello World');
+  },
+  {
+    hooks: {
+      // Same hooks as createProviderAuthRouter
+    },
+    useTopLevelDomain: true, // Optional
+    basePath: "/auth" // Optional
+  }
+);
+
+// Use in your fetch handler
+async function handleRequest(request, env, ctx) {
+  // Option 1: Use separate router
+  // const url = new URL(request.url);
+  // if (url.pathname.startsWith('/auth/')) {
+  //   return providerRouter(request, env, ctx);
+  // }
+  
+  // Option 2: Use middleware for everything (recommended)
+  return providerAuthMiddleware(request, env, ctx);
+}
+```
+
+**Consumer Router and Middleware:**
+
+```typescript
+import { createConsumerAuthRouter, withAuth } from '@open-game-collective/auth-kit/consumer/server';
+
+// Option 1: Create a separate consumer router (when you need separate control)
+const consumerRouter = createConsumerAuthRouter({
+  hooks: {
+    // Base auth hooks
+    // ...
+    
+    // Consumer-specific hooks
+    storeOpenGameLink: async ({ gameUserId, openGameUserId, env }) => { /* ... */ },
+    getOpenGameUserId: async ({ gameUserId, env }) => { /* ... */ },
+    getOpenGameProfile: async ({ openGameUserId, env }) => { /* ... */ }
+  },
+  gameId: "your-game-id", // Required for consumer router
+  useTopLevelDomain: true, // Optional
+  basePath: "/auth" // Optional
+});
+
+// Option 2: Create consumer-specific authenticated middleware (recommended)
+const consumerAuthMiddleware = withAuth(
+  async (request, env, { userId, sessionId, sessionToken }) => {
+    // This handler runs for non-auth routes
+    // Auth routes like /auth/* are handled automatically by the middleware
+    
+    const url = new URL(request.url);
+    
+    if (url.pathname === '/profile') {
+      return new Response(`Hello, game user ${userId}!`);
+    }
+    
+    // Default route
+    return new Response('Hello World');
+  },
+  {
+    hooks: {
+      // Same hooks as createConsumerAuthRouter
+    },
+    gameId: "your-game-id", // Required for consumer
+    useTopLevelDomain: true, // Optional
+    basePath: "/auth" // Optional
+  }
+);
+
+// Use in your fetch handler
+async function handleRequest(request, env, ctx) {
+  // Option 1: Use separate router
+  // const url = new URL(request.url);
+  // if (url.pathname.startsWith('/auth/')) {
+  //   return consumerRouter(request, env, ctx);
+  // }
+  
+  // Option 2: Use middleware for everything (recommended)
+  return consumerAuthMiddleware(request, env, ctx);
+}
+```
+
+**Auth Endpoints:**
+
+- `POST /auth/anonymous`: Create anonymous user
+- `POST /auth/request-code`: Request email verification code
+- `POST /auth/verify`: Verify email code
+- `POST /auth/refresh`: Refresh session token
+- `POST /auth/logout`: Clear session
+- `POST /auth/web-code`: Generate one-time web auth code
+
+**Provider Endpoints:**
+
+- `GET /auth/linked-accounts`: Get linked accounts
+- `POST /auth/account-link-token`: Create account link token
+- `DELETE /auth/linked-accounts/:gameId`: Unlink account
+- `POST /auth/verify-link-token`: Verify link token from consumer
+- `POST /auth/confirm-link`: Confirm account link
+
+**Consumer Endpoints:**
+
+- `GET /auth/opengame-link`: Get OpenGame link status
+- `POST /auth/verify-link-token`: Verify link token
+- `POST /auth/confirm-link`: Confirm account link
+
+### Using withAuth with Hono
+
+[Hono](https://hono.dev/) is a popular lightweight web framework for Cloudflare Workers. Here's how to integrate Auth Kit's `withAuth` with Hono:
+
+```typescript
+import { Hono } from 'hono';
+import { withAuth } from "@open-game-collective/auth-kit/server";
+import { Env } from "./env";
+
+// Define your hooks
+const authHooks = {
+  getUserIdByEmail: async ({ email, env }) => { /* ... */ },
+  // ... other hooks
+};
+
+// Create a Hono app
+const app = new Hono<{ Bindings: Env, Variables: { auth?: { userId: string, sessionId: string, sessionToken: string } } }>();
+
+// Create the auth handler
+const authHandler = withAuth(
+  async (request, env, authInfo) => {
+    // Return a response with auth info in headers
+    // This is just to pass the auth info to our middleware
+    const response = new Response(null, { status: 200 });
+    response.headers.set('X-Auth-Info', JSON.stringify(authInfo));
+    return response;
+  },
+  {
+    hooks: authHooks,
+    useTopLevelDomain: true,
+    basePath: "/auth"
+  }
+);
+
+// Auth middleware for Hono
+app.use('*', async (c, next) => {
+  const { req, env } = c;
+  
+  // Check if this is an auth route
+  const url = new URL(req.url);
+  if (url.pathname.startsWith('/auth/')) {
+    // Handle auth routes directly
+    return authHandler(req.raw, env);
+  }
+  
+  try {
+    // Process the request through the auth handler
+    const authResponse = await authHandler(req.raw, env);
+    
+    // If auth was successful, extract the auth info
+    if (authResponse.ok) {
+      const authInfoStr = authResponse.headers.get('X-Auth-Info');
+      if (authInfoStr) {
+        const authInfo = JSON.parse(authInfoStr);
+        // Store auth info in Hono's context
+        c.set('auth', authInfo);
+      }
+    }
+    
+    // Continue to the next middleware/route handler
+    return next();
+  } catch (error) {
+    // If there's an error in auth processing, return an error response
+    return new Response(JSON.stringify({ error: 'Authentication error' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    }));
+  }
+});
+
+// Create a middleware function that adds auth info to the request object
+function createAuthMiddleware() {
+  // Create the withAuth handler
+  const authHandler = withAuth(
+    async (request, env, authInfo) => {
+      // Store auth info in a custom property on the request object
+      // We'll use a WeakMap to avoid modifying the Request object directly
+      const requestExt = new Request(request);
+      requestMap.set(requestExt, { 
+        auth: authInfo,
+        originalRequest: request
+      });
+      
+      // Return the extended request to be used by the next middleware
+      return requestExt;
+    },
+    {
+      hooks: authHooks,
+      useTopLevelDomain: true,
+      basePath: "/auth"
+    }
+  );
+  
+  // Return the middleware function
+  return async (request: Request, env: Env, ctx: ExecutionContext, next: (req: Request) => Promise<Response>) => {
+    // Check if this is an auth route
+    const url = new URL(request.url);
+    if (url.pathname.startsWith('/auth/')) {
+      // Handle auth routes directly
+      return authHandler(request, env, ctx);
+    }
+    
+    try {
+      // Process the request through the auth handler
+      const extendedRequest = await authHandler(request, env, ctx) as Request;
+      
+      // Call the next middleware with the extended request
+      return await next(extendedRequest);
+    } catch (error) {
+      // If there's an error in auth processing, return an error response
+      return new Response(JSON.stringify({ error: 'Authentication error' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  };
+}
+
+// WeakMap to store auth info without modifying Request objects
+const requestMap = new WeakMap<Request, { auth: any, originalRequest: Request }>();
+
+// Helper to get auth info from a request
+export function getAuthInfo(request: Request) {
+  const info = requestMap.get(request);
+  if (!info) {
+    throw new Error('Request has not been processed by auth middleware');
+  }
+  return info.auth;
+}
+
+// Example usage with an Express-like middleware stack
+const router = {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    // Create middleware stack
+    const middlewares = [
+      createAuthMiddleware(),
+      async (request: Request, env: Env, ctx: ExecutionContext, next: (req: Request) => Promise<Response>) => {
+        console.log('Request received:', new URL(request.url).pathname);
+        return next(request);
+      },
+      // Add more middlewares as needed
+    ];
+    
+    // Final handler
+    const finalHandler = async (request: Request) => {
+      const url = new URL(request.url);
+      
+      if (url.pathname === '/dashboard') {
+        // Get auth info from the request
+        const { userId } = getAuthInfo(request);
+        return new Response(`Hello, user ${userId}! This is your dashboard.`);
+      }
+      
+      return new Response('Hello World');
+    };
+    
+    // Execute middleware chain
+    let currentHandler = finalHandler;
+    
+    // Build the middleware chain in reverse
+    for (const middleware of [...middlewares].reverse()) {
+      const next = currentHandler;
+      currentHandler = (request) => middleware(request, env, ctx, next);
+    }
+    
+    // Start the middleware chain
+    return currentHandler(request);
+  }
+};
+
+// Export the worker
+export default router;
+```
+
+This approach allows you to:
+
+1. Use `withAuth` in an Express-style middleware pattern
+2. Automatically handle auth routes (`/auth/*`)
+3. Add authentication information to requests for other routes
+4. Access auth information in subsequent middleware or route handlers
+5. Maintain the chain of middleware execution
+
+You can also adapt this pattern for provider and consumer authentication by using the appropriate `withAuth` function:
+
+```typescript
+import { withAuth } from "@open-game-collective/auth-kit/provider/server";
+// or
+import { withAuth } from "@open-game-collective/auth-kit/consumer/server";
+
+// Then follow the same pattern as above
 ```
 
 ### Configuring Cloudflare KV
@@ -933,123 +1928,7 @@ const hooks = {
 };
 ```
 
-### Accessing Auth from Your Application
-
-To integrate the auth system with your application, you can extend the `WorkerEntrypoint` class:
-
-```typescript
-// app/worker.ts (e.g., for Remix, Next.js, etc.)
-import { Env } from "./env";
-import { createRequestHandler } from "@remix-run/cloudflare";
-import * as build from "@remix-run/dev/server-build";
-import { AuthWorker } from "./auth-worker";
-import { WorkerEntrypoint } from "@cloudflare/workers-types";
-import { jwtVerify } from "jose";
-
-export default class AppWorker extends WorkerEntrypoint<Env> {
-  // Create an instance of the AuthWorker
-  private authWorker = new AuthWorker();
-  
-  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    const url = new URL(request.url);
-    
-    // Handle auth routes with the AuthWorker
-    if (url.pathname.startsWith('/auth/')) {
-      return this.authWorker.fetch(request, env, ctx);
-    }
-    
-    // For non-auth routes, extract auth info from cookies/headers
-    // and pass it to your application
-    const sessionToken = getCookie(request, 'auth_session_token');
-    let authInfo = { isAuthenticated: false };
-    
-    if (sessionToken) {
-      try {
-        // Verify the session token
-        const verified = await verifyToken(sessionToken, env.AUTH_SECRET);
-        if (verified) {
-          authInfo = {
-            isAuthenticated: true,
-            userId: verified.userId,
-            email: verified.email,
-          };
-        }
-      } catch (error) {
-        console.error("Error verifying session token:", error);
-      }
-    }
-    
-    // Pass auth info to your application
-    return createRequestHandler({
-      build,
-      mode: process.env.NODE_ENV,
-      getLoadContext() {
-        return { 
-          env, 
-          auth: authInfo
-        };
-      },
-    })(request);
-  }
-}
-
-// Helper functions for cookies and token verification
-function getCookie(request: Request, name: string): string | undefined {
-  const cookieHeader = request.headers.get("cookie") || request.headers.get("Cookie");
-  if (!cookieHeader) return undefined;
-  
-  const cookies = cookieHeader.split(";").map((cookie) => cookie.trim());
-  const cookie = cookies.find((cookie) => cookie.startsWith(`${name}=`));
-  
-  if (!cookie) return undefined;
-  return decodeURIComponent(cookie.split("=")[1]);
-}
-
-async function verifyToken(token: string, secret: string) {
-  try {
-    const verified = await jwtVerify(token, new TextEncoder().encode(secret));
-    return verified.payload;
-  } catch (error) {
-    return null;
-  }
-}
-```
-
-### Using KV with Auth Kit
-
-Cloudflare KV provides several advantages for implementing Auth Kit hooks:
-
-1. **Global Distribution**: KV data is replicated globally, providing low-latency access from any Cloudflare edge location.
-2. **Shared State**: Unlike Durable Objects, KV allows sharing state across multiple workers and regions.
-3. **Simple API**: KV provides a straightforward key-value API that's easy to use.
-4. **Automatic Expiration**: KV supports automatic expiration for items like verification codes.
-5. **High Read Performance**: KV is optimized for high-performance reads.
-
-### Benefits of the Worker Class Approach
-
-The `WorkerEntrypoint` class implementation shown above offers several advantages:
-
-1. **Standard Cloudflare Pattern**: Using `WorkerEntrypoint` follows the recommended Cloudflare Workers pattern for class-based workers.
-2. **Proper Inheritance**: Extends the base worker class, giving you access to all its features and lifecycle methods.
-3. **Initialization Efficiency**: Hooks are defined only once when the worker is instantiated, not on every request.
-4. **Type Safety**: The generic type parameter `<Env>` ensures proper typing of environment variables.
-5. **Code Organization**: The class structure provides a clean way to organize related functionality.
-6. **Composability**: Makes it easy to compose multiple worker functionalities by extending and delegating.
-7. **Testability**: The class structure makes it easier to write unit tests for your auth implementation.
-8. **Maintainability**: Separating the auth logic into its own class makes the codebase more maintainable.
-
-This approach is particularly beneficial for high-traffic applications where performance is critical. By defining hooks and creating the router only once, you reduce the overhead of each request, resulting in faster response times and lower compute costs.
-
-#### Integration with Auth Kit
-
-To integrate KV with Auth Kit:
-
-1. **Create the KV namespace** in your Cloudflare dashboard or using Wrangler.
-2. **Implement the auth hooks** using KV operations.
-3. **Create the auth router** in your worker's fetch handler.
-4. **Handle auth routes** by checking the URL path.
-
-#### Key Structure for KV
+### Key Structure for KV
 
 When using KV for auth data, a good key structure helps organize your data:
 
@@ -1062,12 +1941,77 @@ When using KV for auth data, a good key structure helps organize your data:
 
 This structure makes it easy to find and manage related data.
 
-## API Reference
+For provider or consumer-specific functionality, you would use the corresponding router:
 
-- [Client API](#client-api)
-- [Provider Client API](#provider-client-api)
-- [Consumer Client API](#consumer-client-api)
-- [Server API](#server-api)
-- [React API](#react-api)
-- [Test API](#test-api)
-- [HTTP Endpoints](#http-endpoints)
+```typescript
+// For provider functionality
+import { createProviderAuthRouter } from "@open-game-collective/auth-kit/provider/server";
+
+// Define provider-specific hooks...
+const providerHooks = {
+  // Base auth hooks...
+  
+  // Provider-specific hooks
+  getGameIdFromApiKey: async ({ apiKey, env }) => { /* ... */ },
+  storeAccountLink: async ({ openGameUserId, gameId, gameUserId, env }) => { /* ... */ },
+  getLinkedAccounts: async ({ openGameUserId, env }) => { /* ... */ },
+  removeAccountLink: async ({ openGameUserId, gameId, env }) => { /* ... */ }
+};
+
+// In your fetch handler
+if (url.pathname.startsWith('/auth/')) {
+  return createProviderAuthRouter({
+    hooks: providerHooks,
+    useTopLevelDomain: true,
+    basePath: "/auth"
+  })(request, env, ctx);
+}
+```
+
+```typescript
+// For consumer functionality
+import { createConsumerAuthRouter } from "@open-game-collective/auth-kit/consumer/server";
+
+// Define consumer-specific hooks...
+const consumerHooks = {
+  // Base auth hooks...
+  
+  // Consumer-specific hooks
+  storeOpenGameLink: async ({ gameUserId, openGameUserId, env }) => { /* ... */ },
+  getOpenGameUserId: async ({ gameUserId, env }) => { /* ... */ },
+  getOpenGameProfile: async ({ openGameUserId, env }) => { /* ... */ }
+};
+
+// In your fetch handler
+if (url.pathname.startsWith('/auth/')) {
+  return createConsumerAuthRouter({
+    hooks: consumerHooks,
+    gameId: env.GAME_ID, // Required for consumer router
+    useTopLevelDomain: true,
+    basePath: "/auth"
+  })(request, env, ctx);
+}
+```
+
+**Auth Endpoints:**
+
+- `POST /auth/anonymous`: Create anonymous user
+- `POST /auth/request-code`: Request email verification code
+- `POST /auth/verify`: Verify email code
+- `POST /auth/refresh`: Refresh session token
+- `POST /auth/logout`: Clear session
+- `POST /auth/web-code`: Generate one-time web auth code
+
+**Provider Endpoints:**
+
+- `GET /auth/linked-accounts`: Get linked accounts
+- `POST /auth/account-link-token`: Create account link token
+- `DELETE /auth/linked-accounts/:gameId`: Unlink account
+- `POST /auth/verify-link-token`: Verify link token from consumer
+- `POST /auth/confirm-link`: Confirm account link
+
+**Consumer Endpoints:**
+
+- `GET /auth/opengame-link`: Get OpenGame link status
+- `POST /auth/verify-link-token`: Verify link token
+- `POST /auth/confirm-link`: Confirm account link
