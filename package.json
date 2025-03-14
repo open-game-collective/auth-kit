@@ -1,6 +1,6 @@
 {
   "name": "@open-game-collective/auth-kit",
-  "version": "0.0.11",
+  "version": "0.1.0",
   "publishConfig": {
     "access": "public"
   },
@@ -17,9 +17,45 @@
       "types": "./src/server.ts",
       "import": "./src/server.ts"
     },
+    "./middleware": {
+      "types": "./src/server.ts",
+      "import": "./src/server.ts"
+    },
     "./test": {
       "types": "./src/test.ts",
       "import": "./src/test.ts"
+    },
+    "./provider/client": {
+      "types": "./src/provider-client.ts",
+      "import": "./src/provider-client.ts"
+    },
+    "./provider/react": {
+      "types": "./src/provider-react.tsx",
+      "import": "./src/provider-react.tsx"
+    },
+    "./provider/server": {
+      "types": "./src/provider-server.ts",
+      "import": "./src/provider-server.ts"
+    },
+    "./provider/middleware": {
+      "types": "./src/provider-server.ts",
+      "import": "./src/provider-server.ts"
+    },
+    "./consumer/client": {
+      "types": "./src/consumer-client.ts",
+      "import": "./src/consumer-client.ts"
+    },
+    "./consumer/react": {
+      "types": "./src/consumer-react.tsx",
+      "import": "./src/consumer-react.tsx"
+    },
+    "./consumer/server": {
+      "types": "./src/consumer-server.ts",
+      "import": "./src/consumer-server.ts"
+    },
+    "./consumer/middleware": {
+      "types": "./src/consumer-server.ts",
+      "import": "./src/consumer-server.ts"
     }
   },
   "files": [
@@ -34,7 +70,7 @@
     "format": "biome format --write .",
     "lint": "biome check .",
     "lint:fix": "biome check --apply .",
-    "ci": "npm run typecheck && npm run lint && npm run test"
+    "ci": "npm run lint && npm run typecheck && npm run test"
   },
   "author": "jonmumm",
   "license": "MIT",
