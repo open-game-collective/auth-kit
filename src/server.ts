@@ -585,31 +585,29 @@ export function createAuthRouter<TEnv extends { AUTH_SECRET: string }>(config: {
   };
 }
 
-export function withAuth<TEnv extends { AUTH_SECRET: string }>(
-  handler: (
+/**
+ * Creates an authentication middleware that handles session validation and creation
+ * but does not include route handling for auth endpoints.
+ */
+export function createAuthMiddleware<TEnv extends { AUTH_SECRET: string }>(config: {
+  hooks: AuthHooks<TEnv>;
+  useTopLevelDomain?: boolean;
+}) {
+  const { hooks, useTopLevelDomain = false } = config;
+
+  return async (
     request: Request,
-    env: TEnv,
-    { userId, sessionId, sessionToken }: { userId: string; sessionId: string; sessionToken: string }
-  ) => Promise<Response>,
-  config: {
-    hooks: AuthHooks<TEnv>;
-    useTopLevelDomain?: boolean;
-    basePath?: string;
-  }
-) {
-  const { hooks, useTopLevelDomain = false, basePath = "/auth" } = config;
-  const router = createAuthRouter({ hooks, useTopLevelDomain, basePath });
-
-  return async (request: Request, env: TEnv): Promise<Response> => {
-    const url = new URL(request.url);
-    const normalizedBasePath = basePath.startsWith("/") ? basePath.slice(1) : basePath;
-
-    // Handle auth routes first
-    if (url.pathname.startsWith(`/${normalizedBasePath}/`)) {
-      return router(request, env);
-    }
-
+    env: TEnv
+  ): Promise<{
+    userId: string;
+    sessionId: string;
+    sessionToken: string;
+    newSessionToken?: string;
+    newRefreshToken?: string;
+    redirectResponse?: Response; // Add this to handle redirects
+  }> => {
     // Check for web auth code in URL
+    const url = new URL(request.url);
     const webAuthCode = url.searchParams.get("code");
     if (webAuthCode) {
       try {
@@ -624,7 +622,7 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
         }
 
         // Create new session for the web client
-        const _sessionId = crypto.randomUUID();
+        const sessionId = crypto.randomUUID();
 
         // Use email from the web auth code if available
         const newSessionToken = await createSessionToken(
@@ -635,11 +633,11 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
         );
         const newRefreshToken = await createRefreshToken(payload.userId, env.AUTH_SECRET);
 
-        // Redirect to remove the code from URL
+        // Create redirect response to remove code from URL
         const redirectUrl = new URL(request.url);
         redirectUrl.searchParams.delete("code");
 
-        const response = new Response(null, {
+        const redirectResponse = new Response(null, {
           status: 302,
           headers: {
             Location: redirectUrl.toString(),
@@ -647,16 +645,23 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
         });
 
         // Set the auth cookies
-        response.headers.append(
+        redirectResponse.headers.append(
           "Set-Cookie",
           createCookieString(SESSION_TOKEN_COOKIE, newSessionToken, "", request, useTopLevelDomain)
         );
-        response.headers.append(
+        redirectResponse.headers.append(
           "Set-Cookie",
           createCookieString(REFRESH_TOKEN_COOKIE, newRefreshToken, "", request, useTopLevelDomain)
         );
 
-        return response;
+        return {
+          userId: payload.userId,
+          sessionId,
+          sessionToken: newSessionToken,
+          newSessionToken,
+          newRefreshToken,
+          redirectResponse, // Return the redirect response
+        };
       } catch (error) {
         // Invalid code, continue with normal auth flow
         console.error("Invalid web auth code:", error);
@@ -737,10 +742,47 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
       }
     }
 
-    const response = await handler(request, env, {
+    return {
       userId,
       sessionId,
       sessionToken: currentSessionToken,
+      newSessionToken,
+      newRefreshToken,
+    };
+  };
+}
+
+/**
+ * Creates a middleware that applies authentication and sets cookies
+ * but does not include route handling for auth endpoints.
+ */
+export function createAuthHandler<TEnv extends { AUTH_SECRET: string }>(
+  handler: (
+    request: Request,
+    env: TEnv,
+    { userId, sessionId, sessionToken }: { userId: string; sessionId: string; sessionToken: string }
+  ) => Promise<Response>,
+  config: {
+    hooks: AuthHooks<TEnv>;
+    useTopLevelDomain?: boolean;
+  }
+) {
+  const { useTopLevelDomain = false } = config;
+  const middleware = createAuthMiddleware(config);
+
+  return async (request: Request, env: TEnv): Promise<Response> => {
+    const { userId, sessionId, sessionToken, newSessionToken, newRefreshToken, redirectResponse } =
+      await middleware(request, env);
+
+    // If we have a redirect response (e.g., from web auth code), return it
+    if (redirectResponse) {
+      return redirectResponse;
+    }
+
+    const response = await handler(request, env, {
+      userId,
+      sessionId,
+      sessionToken,
     });
 
     if (newSessionToken) {
@@ -757,6 +799,40 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
     }
 
     return response;
+  };
+}
+
+/**
+ * Combines the auth router and middleware for backward compatibility.
+ * This function handles both auth routes and adds authentication to other routes.
+ */
+export function withAuth<TEnv extends { AUTH_SECRET: string }>(
+  handler: (
+    request: Request,
+    env: TEnv,
+    { userId, sessionId, sessionToken }: { userId: string; sessionId: string; sessionToken: string }
+  ) => Promise<Response>,
+  config: {
+    hooks: AuthHooks<TEnv>;
+    useTopLevelDomain?: boolean;
+    basePath?: string;
+  }
+) {
+  const { hooks, useTopLevelDomain = false, basePath = "/auth" } = config;
+  const router = createAuthRouter({ hooks, useTopLevelDomain, basePath });
+  const authHandler = createAuthHandler(handler, { hooks, useTopLevelDomain });
+
+  return async (request: Request, env: TEnv): Promise<Response> => {
+    const url = new URL(request.url);
+    const normalizedBasePath = basePath.startsWith("/") ? basePath.slice(1) : basePath;
+
+    // Handle auth routes first
+    if (url.pathname.startsWith(`/${normalizedBasePath}/`)) {
+      return router(request, env);
+    }
+
+    // For other routes, apply authentication
+    return authHandler(request, env);
   };
 }
 

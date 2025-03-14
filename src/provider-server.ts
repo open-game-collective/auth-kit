@@ -1,5 +1,7 @@
 import { jwtVerify } from "jose";
 import {
+  createAuthHandler as baseCreateAuthHandler,
+  createAuthMiddleware as baseCreateAuthMiddleware,
   createAuthRouter,
   createLinkToken,
   verifySession,
@@ -386,6 +388,37 @@ export function createProviderAuthRouter<TEnv extends { AUTH_SECRET: string }>(
       return baseRouter(request, env, ctx);
     },
   };
+}
+
+/**
+ * Creates a provider authentication middleware that handles session validation and creation
+ * but does not include route handling for auth endpoints.
+ */
+export function createAuthMiddleware<TEnv extends { AUTH_SECRET: string }>(config: {
+  hooks: ProviderAuthHooks<TEnv>;
+  useTopLevelDomain?: boolean;
+}) {
+  // Use the base middleware since provider hooks extend base hooks
+  return baseCreateAuthMiddleware(config);
+}
+
+/**
+ * Creates a provider middleware that applies authentication and sets cookies
+ * but does not include route handling for auth endpoints.
+ */
+export function createAuthHandler<TEnv extends { AUTH_SECRET: string }>(
+  handler: (
+    request: Request,
+    env: TEnv,
+    { userId, sessionId, sessionToken }: { userId: string; sessionId: string; sessionToken: string }
+  ) => Promise<Response>,
+  config: {
+    hooks: ProviderAuthHooks<TEnv>;
+    useTopLevelDomain?: boolean;
+  }
+) {
+  // Use the base handler since provider hooks extend base hooks
+  return baseCreateAuthHandler(handler, config);
 }
 
 /**

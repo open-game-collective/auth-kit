@@ -1,5 +1,9 @@
 import { jwtVerify } from "jose";
 import { createAuthRouter, verifySession, withAuth as baseWithAuth } from "./server";
+import {
+  createAuthHandler as baseCreateAuthHandler,
+  createAuthMiddleware as baseCreateAuthMiddleware,
+} from "./server";
 import { ConsumerAuthHooks } from "./types";
 
 // Add ExecutionContext type definition
@@ -285,6 +289,37 @@ export function createConsumerAuthRouter<TEnv extends { AUTH_SECRET: string }>(
       return baseRouter(request, env, ctx);
     },
   };
+}
+
+/**
+ * Creates a consumer authentication middleware that handles session validation and creation
+ * but does not include route handling for auth endpoints.
+ */
+export function createAuthMiddleware<TEnv extends { AUTH_SECRET: string }>(config: {
+  hooks: ConsumerAuthHooks<TEnv>;
+  useTopLevelDomain?: boolean;
+}) {
+  // Use the base middleware since consumer hooks extend base hooks
+  return baseCreateAuthMiddleware(config);
+}
+
+/**
+ * Creates a consumer middleware that applies authentication and sets cookies
+ * but does not include route handling for auth endpoints.
+ */
+export function createAuthHandler<TEnv extends { AUTH_SECRET: string }>(
+  handler: (
+    request: Request,
+    env: TEnv,
+    { userId, sessionId, sessionToken }: { userId: string; sessionId: string; sessionToken: string }
+  ) => Promise<Response>,
+  config: {
+    hooks: ConsumerAuthHooks<TEnv>;
+    useTopLevelDomain?: boolean;
+  }
+) {
+  // Use the base handler since consumer hooks extend base hooks
+  return baseCreateAuthHandler(handler, config);
 }
 
 /**

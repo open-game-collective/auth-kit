@@ -1,6 +1,6 @@
 {
   "name": "@open-game-collective/auth-kit",
-  "version": "0.0.11",
+  "version": "0.1.0",
   "publishConfig": {
     "access": "public"
   },
@@ -14,6 +14,10 @@
       "import": "./src/react.tsx"
     },
     "./server": {
+      "types": "./src/server.ts",
+      "import": "./src/server.ts"
+    },
+    "./middleware": {
       "types": "./src/server.ts",
       "import": "./src/server.ts"
     },
@@ -33,6 +37,10 @@
       "types": "./src/provider-server.ts",
       "import": "./src/provider-server.ts"
     },
+    "./provider/middleware": {
+      "types": "./src/provider-server.ts",
+      "import": "./src/provider-server.ts"
+    },
     "./consumer/client": {
       "types": "./src/consumer-client.ts",
       "import": "./src/consumer-client.ts"
@@ -42,6 +50,10 @@
       "import": "./src/consumer-react.tsx"
     },
     "./consumer/server": {
+      "types": "./src/consumer-server.ts",
+      "import": "./src/consumer-server.ts"
+    },
+    "./consumer/middleware": {
       "types": "./src/consumer-server.ts",
       "import": "./src/consumer-server.ts"
     }
