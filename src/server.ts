@@ -93,7 +93,7 @@ function getCookie(request: Request, name: string): string | undefined {
   }
   
   // Extract and decode the value
-  return decodeURIComponent(cookie.split("=")[1]);
+  return decodeURIComponent(cookie.split("=")[1] ?? '');
 }
 
 function generateVerificationCode(): string {
@@ -118,21 +118,20 @@ function createCookieString(
   if (request && useTopLevelDomain) {
     const url = new URL(request.url);
     const hostname = url.hostname;
-    
-    // Check if this is an IP address (don't set domain for IPs)
-    const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname === 'localhost';
-    
-    if (!isIpAddress && hostname) {
-      // Extract the top-level domain and first subdomain
-      // e.g., api.example.com -> .example.com
-      const parts = hostname.split('.');
-      if (parts.length > 1) {
-        // Get the top-level domain with one subdomain level
-        // For example: from "api.example.com" get ".example.com"
-        const domain = '.' + parts.slice(-2).join('.');
-        cookieString += `; Domain=${domain}`;
+
+    // Explicitly skip domain logic for localhost
+    if (hostname !== 'localhost') {
+      // Only run the IP check and domain derivation for non-localhost hostnames
+      const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+      if (!isIpAddress && hostname) {
+        const parts = hostname.split('.');
+        if (parts.length > 1) {
+          const domain = '.' + parts.slice(-2).join('.');
+          cookieString += `; Domain=${domain}`;
+        }
       }
     }
+    // Otherwise, if hostname is 'localhost', do nothing and let the cookie apply to localhost only.
   }
   // Note: If useTopLevelDomain is false, no Domain attribute is set,
   // which means the cookie is only valid for the exact domain
@@ -673,4 +672,4 @@ export function withAuth<TEnv extends { AUTH_SECRET: string }>(
   };
 }
 
-export { AuthHooks } from "./types";
+export type { AuthHooks } from "./types";
